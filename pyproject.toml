@@ -1,0 +1,13 @@
+[project]
+name = "mycar"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "donkeycar>=5.2.0",
+    "mavsdk>=3.15.3",
+    "opencv-python-headless>=4.13.0.92",
+    "tensorflow>=2.20.0",
+    "tornado>=6.2",
+]

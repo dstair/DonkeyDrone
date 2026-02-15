@@ -127,6 +127,7 @@ class DroneGymEnv:
         self._offboard_started = False
         self._cap = None
         self._loop = None
+        self._frame_skip = 0
 
     def _start_camera(self):
         """Open RTSP stream from Gazebo."""
@@ -135,6 +136,8 @@ class DroneGymEnv:
         # Try direct RTSP first
         self._cap = cv2.VideoCapture(self.rtsp_url)
         if self._cap.isOpened():
+            # Minimize frame buffer to reduce decode overhead
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             logger.info("RTSP stream opened successfully")
             return
 
@@ -230,8 +233,10 @@ class DroneGymEnv:
             await drone.offboard.set_velocity_body(
                 VelocityBodyYawspeed(forward_vel, 0.0, down_vel, yaw_rate))
 
-            # Capture camera frame
-            self._capture_frame()
+            # Capture camera frame every other iteration to reduce CPU
+            self._frame_skip += 1
+            if self._frame_skip % 2 == 0:
+                self._capture_frame()
 
             await asyncio.sleep(0.05)  # ~20 Hz control loop
 

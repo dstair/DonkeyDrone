@@ -51,7 +51,7 @@ DRONE_RECORD_ATTITUDE = True
 DRONE_RECORD_VELOCITY = True
 
 # ---- Vehicle Loop ----
-DRIVE_LOOP_HZ = 20
+DRIVE_LOOP_HZ = 10
 
 # ---- Data Storage ----
 # Always create a new tub (drone schema differs from car schema)

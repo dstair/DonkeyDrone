@@ -62,16 +62,26 @@ docker pull jonasvautherin/px4-gazebo-headless:latest --platform linux/arm64
 # above arm64 build runs best for Mac, but for amd64 build: docker pull jonasvautherin/px4-gazebo-headless:1.16.1
 ```
 
+
+### 2a download Gazebo worlds of interest
+
+git clone https://github.com/PX4/PX4-gazebo-models.git ~/dev/px4-gazebo-models
+
 ### 3. Start the simulator
 
+# choose your Gazebo 8.10 world - walls, baylands, forest
 ```bash
-docker run --platform linux/arm64 --rm -d \
-  --name px4_sitl \
-  -p 14540:14540/udp \
-  -p 14550:14550/udp \
-  -p 8554:8554 \
-  jonasvautherin/px4-gazebo-headless:latest \
-  -v gz_x500_mono_cam
+  docker run --platform linux/arm64 --rm -d \
+    --name px4_sitl \
+    --cpus=3 \
+    --volume ~/dev/px4-gazebo-models/worlds:/root/px4/Tools/simulation/gz/worlds \
+    --volume ~/dev/px4-gazebo-models/models:/root/px4/Tools/simulation/gz/models \
+    -p 14540:14540/udp \
+    -p 14550:14550/udp \
+    -p 8554:8554 \
+    jonasvautherin/px4-gazebo-headless:latest \
+    -v gz_x500_mono_cam \
+    -w walls
 ```
 
 Wait ~20 seconds for PX4 to boot, then verify:
@@ -153,11 +163,11 @@ macOS Host                          Docker Container
 
 | File | Purpose |
 |------|---------|
-| `drone_manage.py` | Main entry point (replaces `manage.py` for drone use) |
-| `drone_gym.py` | DroneGymEnv part: MAVSDK + RTSP bridge to DonkeyCar |
-| `drone_config.py` | Drone-specific configuration |
-| `config.py` | Base DonkeyCar config (shared, not modified) |
-| `manage.py` | Original car entry point (unchanged) |
+| `drone_manage.py` | Main entry point (replaces `manage.py` for drone use)
+| `drone_gym.py`    | DroneGymEnv part: MAVSDK + RTSP bridge to DonkeyCar
+| `drone_config.py` | Drone-specific configuration
+| `config.py`       | Base DonkeyCar config (shared, not modified)
+| `manage.py`       | Original car entry point (unchanged)
 
 
 
@@ -183,3 +193,25 @@ needs ~4GB. Close other applications if needed.
 
 **Drone doesn't reach target altitude**: Under Rosetta emulation the sim runs slowly.
 Lower `DRONE_TARGET_ALTITUDE` in `drone_config.py` (e.g., to 3.0m).
+
+
+###### Fixes for CPU usage too high on M1 Mac
+
+
+Issue: Docker does not have access to the Mac's GPU.
+  ┌──────────────────────────────┬─────────────────────────────┬───────────────────────────────────┐
+  │            Change            │         CPU Savings         │             Trade-off             │
+  ├──────────────────────────────┼─────────────────────────────┼───────────────────────────────────┤
+  │ --cpus=3 on Docker           │ Caps container at 3 cores   │ Sim runs slower                   │
+  ├──────────────────────────────┼─────────────────────────────┼───────────────────────────────────┤
+  │ PX4_SIM_SPEED_FACTOR=0.5     │ ~halves Gazebo load         │ Sim time is 2x slower             │
+  ├──────────────────────────────┼─────────────────────────────┼───────────────────────────────────┤
+  │ DRIVE_LOOP_HZ = 10           │ Less host-side work         │ Sufficient for emulated SITL      │
+  ├──────────────────────────────┼─────────────────────────────┼───────────────────────────────────┤
+  │ RTSP buffer = 1 + frame skip │ Less OpenCV decode overhead │ Camera at ~5 FPS instead of 10-20 │
+  └──────────────────────────────┴─────────────────────────────┴───────────────────────────────────┘
+
+
+
+# TODO:
+- see if there's a way to add GPU support. Can Docker use the M1 GPU? OR is it feasible to get the setup running oSX native for GPU? Right now, performance is borderline.

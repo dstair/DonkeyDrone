@@ -12,7 +12,7 @@
 # """
 
 # ---- Camera ----
-# DroneGymEnv provides images via RTSP from Gazebo, so use MOCK camera
+# DroneGymEnv provides images directly, so use MOCK camera in DonkeyCar
 CAMERA_TYPE = "MOCK"
 
 # ---- Drive Train ----
@@ -23,11 +23,26 @@ DRIVE_TRAIN_TYPE = "MOCK"
 # ---- Drone Simulator ----
 USE_DRONE_SIM = True
 
-# MAVSDK connection to PX4 SITL running in Docker
+# MAVSDK connection to PX4 SITL (Docker or native macOS)
 DRONE_MAVSDK_ADDRESS = "udpin://0.0.0.0:14540"
 
-# RTSP camera stream from Gazebo in Docker
-DRONE_RTSP_URL = "rtsp://127.0.0.1:8554/live"
+# ---- Camera Source ----
+# "gz_transport" - native macOS: Gazebo Harmonic via gz-transport (GPU-accelerated)
+#                  Requires: pip install gz-python
+#                  Discover topic: gz topic -l | grep camera
+# "rtsp"         - Docker mode: RTSP stream from Gazebo Classic in container
+DRONE_CAMERA_SOURCE = "gz_transport"
+
+# gz-transport camera topic (native macOS mode).
+# The default matches gz_x500_mono_cam in the "walls" world.
+# Run `gz topic -l | grep camera` to confirm the topic on your setup.
+DRONE_GZ_CAMERA_TOPIC = (
+    "/world/walls/model/x500_mono_cam_0"
+    "/link/camera_link/sensor/camera_sensor/image"
+)
+
+# RTSP camera stream URL (Docker mode only -- used when DRONE_CAMERA_SOURCE = "rtsp")
+# DRONE_RTSP_URL = "rtsp://127.0.0.1:8554/live"
 
 # ---- Flight Parameters ----
 # Max forward velocity (m/s) when throttle = 1.0

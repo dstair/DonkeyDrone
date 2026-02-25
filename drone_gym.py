@@ -1,9 +1,9 @@
 """
-DroneGymEnv - DonkeyCar part wrapping PX4 SITL + Gazebo via MAVSDK and RTSP.
+DroneGymEnv - DonkeyCar part wrapping PX4 SITL + Gazebo via MAVSDK.
 
-This part connects to a PX4 SITL instance running in Docker (with Gazebo)
-and provides the same interface as DonkeyGymEnv: it accepts (steering, throttle)
-inputs and produces camera images + telemetry outputs.
+This part connects to a PX4 SITL instance (Docker or native macOS) and provides
+the same interface as DonkeyGymEnv: it accepts (steering, throttle) inputs and
+produces camera images + telemetry outputs.
 
 The semantic mapping is:
     steering [-1, 1]  ->  yaw rate (deg/s)
@@ -11,10 +11,19 @@ The semantic mapping is:
 
 Altitude is held constant by a simple PID controller.
 
+Camera sources (set DRONE_CAMERA_SOURCE in drone_config.py):
+    "gz_transport"  Native macOS: subscribe to Gazebo Harmonic camera topic
+                    via gz-transport. Requires gz-python:
+                        pip install gz-python
+                    Run: gz topic -l | grep camera  to find the exact topic name.
+    "rtsp"          Docker mode: read RTSP stream from Gazebo Classic in container.
+                    Requires: port 8554 mapped in docker run command.
+
 Requires:
-    - PX4 SITL + Gazebo running in Docker with camera (gz_x500_mono_cam)
-    - Ports: UDP 14540 (MAVSDK), TCP 8554 (RTSP camera)
+    - PX4 SITL + Gazebo running (Docker or native), UDP 14540 for MAVSDK
     - pip packages: mavsdk, opencv-python-headless
+    - gz-transport mode: gz-python (pip install gz-python)
+    - rtsp mode: opencv with GStreamer support optional
 """
 
 import asyncio
@@ -74,9 +83,19 @@ class AltitudePID:
         return -output
 
 
+_GZ_CAMERA_TOPIC_DEFAULT = (
+    "/world/walls/model/x500_mono_cam_0"
+    "/link/camera_link/sensor/camera_sensor/image"
+)
+
+
 class DroneGymEnv:
     """
-    DonkeyCar part that interfaces with PX4 SITL + Gazebo via MAVSDK and RTSP.
+    DonkeyCar part that interfaces with PX4 SITL + Gazebo via MAVSDK.
+
+    Supports two camera sources (controlled by the camera_source parameter):
+        "gz_transport"  - native macOS: gz-transport subscription (Gazebo Harmonic)
+        "rtsp"          - Docker mode: OpenCV VideoCapture on RTSP stream
 
     This is a threaded part: update() runs the async MAVSDK event loop in a
     background thread, while run_threaded() is called by the Vehicle loop to
@@ -89,6 +108,8 @@ class DroneGymEnv:
     """
 
     def __init__(self, mavsdk_address="udpin://0.0.0.0:14540",
+                 camera_source="gz_transport",
+                 gz_camera_topic=_GZ_CAMERA_TOPIC_DEFAULT,
                  rtsp_url="rtsp://127.0.0.1:8554/live",
                  max_forward_vel=2.0, max_yaw_rate=90.0,
                  target_altitude=10.0,
@@ -99,6 +120,8 @@ class DroneGymEnv:
                  record_velocity=False):
 
         self.mavsdk_address = mavsdk_address
+        self.camera_source = camera_source
+        self.gz_camera_topic = gz_camera_topic
         self.rtsp_url = rtsp_url
         self.max_forward_vel = max_forward_vel
         self.max_yaw_rate = max_yaw_rate
@@ -125,12 +148,13 @@ class DroneGymEnv:
         self.running = True
         self._connected = False
         self._offboard_started = False
-        self._cap = None
+        self._cap = None       # used by RTSP mode
+        self._gz_node = None   # used by gz-transport mode
         self._loop = None
         self._frame_skip = 0
 
     def _start_camera(self):
-        """Open RTSP stream from Gazebo."""
+        """Open RTSP stream from Gazebo (Docker mode)."""
         logger.info("Opening RTSP camera stream: %s", self.rtsp_url)
 
         # Try direct RTSP first
@@ -153,10 +177,10 @@ class DroneGymEnv:
             logger.info("GStreamer pipeline opened successfully")
             return
 
-        logger.warning("Could not open camera stream. Images will be blank.")
+        logger.warning("Could not open RTSP stream. Images will be blank.")
 
     def _capture_frame(self):
-        """Capture a single frame from the RTSP stream and resize."""
+        """Capture a single frame from the RTSP stream and resize (Docker mode)."""
         if self._cap is None or not self._cap.isOpened():
             return
 
@@ -166,6 +190,70 @@ class DroneGymEnv:
             rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
             resized = cv2.resize(rgb, (self.image_w, self.image_h))
             self.frame = resized
+
+    def _start_gz_camera(self):
+        """Subscribe to camera images via gz-transport (native macOS mode).
+
+        Requires gz-python: pip install gz-python
+        The subscription is callback-based; frames are pushed to self.frame
+        by _gz_image_callback() from gz-transport's internal thread.
+
+        Find your exact topic name with:
+            gz topic -l | grep camera
+        """
+        logger.info("Subscribing to gz-transport camera topic: %s",
+                    self.gz_camera_topic)
+        try:
+            from gz.transport13 import Node
+            from gz.msgs10.image_pb2 import Image as GzImage
+
+            self._gz_node = Node()
+            ok = self._gz_node.subscribe(
+                GzImage, self.gz_camera_topic, self._gz_image_callback)
+            if ok:
+                logger.info("gz-transport subscription established")
+            else:
+                logger.warning(
+                    "Failed to subscribe to gz-transport topic '%s'. "
+                    "Check that Gazebo is running and the topic name is correct. "
+                    "Run: gz topic -l | grep camera",
+                    self.gz_camera_topic)
+        except ImportError:
+            logger.warning(
+                "gz-transport Python bindings not available. "
+                "Install with: pip install gz-python  "
+                "Camera images will be blank. "
+                "Alternatively, set DRONE_CAMERA_SOURCE='rtsp' for Docker mode.")
+
+    def _gz_image_callback(self, msg):
+        """Called by gz-transport when a new camera image arrives (native mode).
+
+        Decodes a gz.msgs Image protobuf message to a numpy RGB array and
+        resizes it to the configured DonkeyCar dimensions.
+
+        Pixel format constants (gz.msgs PixelFormatType):
+            1 = L_INT8 (grayscale), 3 = RGB_INT8, 4 = RGBA_INT8, 5 = BGRA_INT8
+        """
+        try:
+            pixel_format = getattr(msg, 'pixel_format_type', 3)  # default RGB_INT8
+            if pixel_format == 1:  # L_INT8 grayscale
+                arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                    msg.height, msg.width)
+                arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2RGB)
+            elif pixel_format == 4:  # RGBA_INT8
+                arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                    msg.height, msg.width, 4)
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGBA2RGB)
+            elif pixel_format == 5:  # BGRA_INT8
+                arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                    msg.height, msg.width, 4)
+                arr = cv2.cvtColor(arr, cv2.COLOR_BGRA2RGB)
+            else:  # RGB_INT8 (3) or unknown -- assume RGB
+                arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                    msg.height, msg.width, 3)
+            self.frame = cv2.resize(arr, (self.image_w, self.image_h))
+        except Exception as e:
+            logger.debug("Error processing gz image: %s", e)
 
     async def _mavsdk_loop(self):
         """Main async loop: connect, arm, takeoff, then send offboard commands."""
@@ -233,10 +321,12 @@ class DroneGymEnv:
             await drone.offboard.set_velocity_body(
                 VelocityBodyYawspeed(forward_vel, 0.0, down_vel, yaw_rate))
 
-            # Capture camera frame every other iteration to reduce CPU
-            self._frame_skip += 1
-            if self._frame_skip % 2 == 0:
-                self._capture_frame()
+            # RTSP mode: poll for frames every other iteration to reduce CPU.
+            # gz-transport mode: frames arrive via push callback; no polling needed.
+            if self.camera_source == 'rtsp':
+                self._frame_skip += 1
+                if self._frame_skip % 2 == 0:
+                    self._capture_frame()
 
             await asyncio.sleep(0.05)  # ~20 Hz control loop
 
@@ -268,7 +358,10 @@ class DroneGymEnv:
         Background thread entry point.
         Runs the asyncio event loop for MAVSDK communication.
         """
-        self._start_camera()
+        if self.camera_source == 'rtsp':
+            self._start_camera()
+        else:
+            self._start_gz_camera()
 
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -315,3 +408,5 @@ class DroneGymEnv:
         time.sleep(1.0)
         if self._cap is not None:
             self._cap.release()
+        # gz-transport node unsubscribes when the object is garbage-collected
+        self._gz_node = None

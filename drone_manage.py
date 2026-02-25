@@ -50,16 +50,20 @@ def add_drone_sim(V, cfg):
     Add the PX4 drone simulator as a DonkeyCar part.
 
     This replaces add_simulator() from manage.py. It creates a DroneGymEnv
-    that connects to PX4 SITL via MAVSDK and captures camera images via RTSP.
+    that connects to PX4 SITL via MAVSDK and captures camera images via either
+    gz-transport (native macOS) or RTSP (Docker).
 
     The memory key names (steering, throttle, cam/image_array) are kept
     identical to the car version so all other parts work unchanged.
     """
-    from drone_gym import DroneGymEnv
+    from drone_gym import DroneGymEnv, _GZ_CAMERA_TOPIC_DEFAULT
 
     gym = DroneGymEnv(
         mavsdk_address=cfg.DRONE_MAVSDK_ADDRESS,
-        rtsp_url=cfg.DRONE_RTSP_URL,
+        camera_source=getattr(cfg, 'DRONE_CAMERA_SOURCE', 'gz_transport'),
+        gz_camera_topic=getattr(cfg, 'DRONE_GZ_CAMERA_TOPIC',
+                                _GZ_CAMERA_TOPIC_DEFAULT),
+        rtsp_url=getattr(cfg, 'DRONE_RTSP_URL', 'rtsp://127.0.0.1:8554/live'),
         max_forward_vel=cfg.DRONE_MAX_FORWARD_VEL,
         max_yaw_rate=cfg.DRONE_MAX_YAW_RATE,
         target_altitude=cfg.DRONE_TARGET_ALTITUDE,
@@ -345,8 +349,13 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     print("DRONE MODE")
     print("=" * 60)
     if getattr(cfg, 'USE_DRONE_SIM', False):
+        camera_source = getattr(cfg, 'DRONE_CAMERA_SOURCE', 'gz_transport')
+        if camera_source == 'gz_transport':
+            camera_info = f"gz-transport  {getattr(cfg, 'DRONE_GZ_CAMERA_TOPIC', '(default topic)')}"
+        else:
+            camera_info = f"rtsp  {getattr(cfg, 'DRONE_RTSP_URL', 'rtsp://127.0.0.1:8554/live')}"
         print(f"  PX4 SITL:  {cfg.DRONE_MAVSDK_ADDRESS}")
-        print(f"  Camera:    {cfg.DRONE_RTSP_URL}")
+        print(f"  Camera:    {camera_info}")
         print(f"  Altitude:  {cfg.DRONE_TARGET_ALTITUDE}m")
         print(f"  Max speed: {cfg.DRONE_MAX_FORWARD_VEL} m/s")
         print(f"  Max yaw:   {cfg.DRONE_MAX_YAW_RATE} deg/s")
@@ -523,7 +532,7 @@ def get_camera(cfg):
 
 def add_camera(V, cfg, camera_type):
     if getattr(cfg, 'USE_DRONE_SIM', False):
-        # In drone sim mode, images come from DroneGymEnv via RTSP.
+        # In drone sim mode, images come from DroneGymEnv (gz-transport or RTSP).
         # Add a MOCK camera as a fallback (it won't overwrite sim images
         # since DroneGymEnv writes to cam/image_array first).
         return

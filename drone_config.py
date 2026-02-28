@@ -38,7 +38,7 @@ DRONE_CAMERA_SOURCE = "gz_transport"
 # Run `gz topic -l | grep camera` to confirm the topic on your setup.
 DRONE_GZ_CAMERA_TOPIC = (
     "/world/walls/model/x500_mono_cam_0"
-    "/link/camera_link/sensor/camera_sensor/image"
+    "/link/camera_link/sensor/camera/image"
 )
 
 # RTSP camera stream URL (Docker mode only -- used when DRONE_CAMERA_SOURCE = "rtsp")

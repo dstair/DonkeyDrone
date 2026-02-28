@@ -3,7 +3,7 @@ name = "mycar"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = "==3.11.14"
+requires-python = "==3.12.*"
 dependencies = [
     "donkeycar>=5.2.0",
     "mavsdk>=3.15.3",

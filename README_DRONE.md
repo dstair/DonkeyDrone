@@ -40,215 +40,193 @@ Two camera modes (set `DRONE_CAMERA_SOURCE` in `drone_config.py`):
 Since the Memory key names are identical to the car version, the web controller,
 CNN model (KerasLinear), training pipeline, and data recording all work unchanged.
 
-
-
 ## Prerequisites
 
 - **Python 3.11**
 - **uv**
 - **One of:**
-  - **Native macOS** (recommended — GPU-accelerated): Gazebo Harmonic + PX4 SITL under Rosetta. See [Native macOS Setup](#native-macos-setup-gpu-accelerated) below.
-  - **Docker Desktop** with Rosetta enabled: Docker Desktop → Settings → General → "Use Rosetta for x86_64/amd64 emulation". See [Docker Setup](#docker-setup-no-gpu) below.
+  - **Native macOS** (recommended — GPU-accelerated): PX4 SITL + Gazebo Harmonic running natively on ARM64. See [Native macOS Setup](#native-macos-setup-gpu-accelerated) below.
+  - **Docker Desktop**: Gazebo Classic + PX4 in a Linux container. No GPU access. See [Docker Setup](#docker-setup-no-gpu) below.
 
 ## Native macOS Setup (GPU-Accelerated)
 
-> **⚠️ WARNING: Native macOS setup on Apple Silicon is EXTREMELY COMPLEX and may not work.**
->
-> **Known Issues:**
-> - PX4 SITL requires x86_64 (Rosetta), but many dependencies exist in ARM64 Homebrew
-> - CMake cannot easily isolate x86_64 libraries when both ARM64 and x86_64 Homebrew exist
-> - Anaconda Qt libraries conflict with x86_64 gz-harmonic
-> - Requires extensive manual dependency management and dual Homebrew installations
->
-> **Recommendation:** Use Docker mode (below) unless you have a specific need for GPU acceleration
-> and are willing to troubleshoot complex architecture conflicts.
+Runs PX4 SITL and Gazebo Harmonic natively on Apple Silicon (ARM64). No Rosetta
+required. Uses the M1/M2 GPU for scene rendering — significantly lower CPU usage
+than Docker.
 
-Runs Gazebo Harmonic natively with Metal/OpenGL rendering. Significantly lower
-CPU usage than Docker since the M1 GPU handles scene rendering.
+> **Known risk:** Metal camera sensor crash ([gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877))
+> may affect `gz_x500_mono_cam`. If you hit it, set `PX4_GZ_SIM_RENDER_ENGINE=ogre`
+> before launching PX4.
 
-This all needs to be done under Rosetta because PX4 Doesn't Support ARM64 Software In The Loop (SITL).
+### Phase 1: Install dependencies (one-time)
 
-> **Known risk:** The Metal camera sensor crash ([gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877))
-> may affect `gz_x500_mono_cam`. If you hit it, add
-> `--render-engine-gui-api-backend opengl` to the `gz sim` invocations below.
-
-### Phase 1: Install Gazebo Harmonic (one-time)
+All dependencies must come from the **ARM64 Homebrew** at `/opt/homebrew`. Do not
+use Rosetta or `/usr/local/bin/brew` for any of these.
 
 ```bash
-arch -x86_64 /usr/local/bin/brew tap osrf/simulation
-arch -x86_64 /usr/local/bin/brew install gz-harmonic
-gz sim --version  # verify install
-```
-
-### Phase 2: Build PX4 SITL under Rosetta (one-time)
-
-PX4 does not support native ARM64 SITL. Use a Rosetta x86 terminal:
-
-1. Run terminal in Rosetta/emulation mode: `arch -x86_64 zsh -l` (depending on shell, replace `zsh` with `bash` etc)
-
-I ended up installing x86_64 homebrew - need to avoid an OpenCV error.
-```bash
-arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-/usr/local/bin/brew install opencv
-
-#/usr/local/Cellar/opencv/4.13.0_3
-```
-
-```bash
+# PX4 build toolchain
 brew tap PX4/px4
 brew install px4-dev
-arch -x86_64 brew install opencv
+brew link --overwrite --force arm-gcc-bin@13
+
+# Gazebo Harmonic (ARM64) — installs gz-sim8, gz-transport13, etc.
+brew tap osrf/simulation
+brew install gz-harmonic
+
+# OpenCV (needed for the optical flow Gazebo plugin)
+brew install opencv
+
+# Verify Gazebo installed correctly
+gz sim --version   # should print: Gazebo Sim, version 8.x.x
+```
+
+### Phase 2: Build PX4 SITL (one-time)
+
+```bash
 git clone https://github.com/PX4/PX4-Autopilot.git --recursive ~/dev/PX4-Autopilot
 cd ~/dev/PX4-Autopilot
-
-# Create x86_64 Python virtual environment (CRITICAL - must be x86_64, not ARM64!)
-/usr/local/bin/python3 -m venv ~/px4-venv-x86
-source ~/px4-venv-x86/bin/activate
-pip install -r /Users/Dan/dev/PX4-Autopilot/Tools/setup/requirements.txt
-
-# Build PX4 in full Rosetta x86_64 environment
-# Note: Comment out -Wdouble-promotion in cmake/px4_add_common_flags.cmake:76
-# if you encounter Abseil compatibility errors
-arch -x86_64 /bin/bash -c "
-cd ~/dev/PX4-Autopilot
-source ~/px4-venv-x86/bin/activate
-PYTHON_EXECUTABLE=\$(which python3) make px4_sitl gz_x500_mono_cam
-"
 ```
 
-### Phase 3: Start PX4 + Gazebo (3 terminals each session)
+Apply a required source patch — `optical_flow.cmake` hardcodes `.so` (Linux
+convention) which breaks linking on macOS. In
+`src/modules/simulation/gz_plugins/optical_flow/optical_flow.cmake`, replace
+both occurrences of `libOpticalFlow.so` with
+`libOpticalFlow${CMAKE_SHARED_LIBRARY_SUFFIX}`.
+
+Then build:
 
 ```bash
-# Terminal 1 (native): Gazebo server
-gz sim -s -r ~/dev/px4-gazebo-models/worlds/walls.sdf
-
-# Terminal 2 (native): Gazebo GUI (GPU-rendered)
-gz sim -g
-
-# Terminal 3 (Rosetta x86): PX4 SITL
 cd ~/dev/PX4-Autopilot
-PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 PX4_SIM_MODEL=gz_x500_mono_cam \
-  ./build/px4_sitl_default/bin/px4
+make px4_sitl gz_x500_mono_cam
 ```
 
-Wait ~15 seconds for PX4 to connect, then verify the camera topic:
+The build ends with `ERROR [init] Timed out waiting for Gazebo world` — this is
+**expected** (the post-build self-test tries to connect to a Gazebo that isn't
+running). The binary is complete. Verify:
 
 ```bash
-gz topic -l | grep camera
-# Should show: /world/walls/model/x500_mono_cam_0/link/camera_link/sensor/camera_sensor/image
+file build/px4_sitl_default/bin/px4
+# → Mach-O 64-bit executable arm64  ✓
 ```
 
-If the topic path differs (e.g., model index `_1` instead of `_0`), update
+After building, create one symlink needed at runtime (the OpticalFlow plugin's
+rpath points to a different directory than where the build places the library):
+
+```bash
+mkdir -p ~/dev/PX4-Autopilot/build/px4_sitl_default/external/Install/lib
+ln -sf ~/dev/PX4-Autopilot/build/px4_sitl_default/OpticalFlow/install/lib/libOpticalFlow.dylib \
+       ~/dev/PX4-Autopilot/build/px4_sitl_default/external/Install/lib/libOpticalFlow.dylib
+```
+
+Also comment out the GstCameraSystem plugin in
+`src/modules/simulation/gz_bridge/server.config` (GStreamer is not built; we use
+gz-transport for camera frames instead):
+
+```xml
+<!-- <plugin entity_name="*" entity_type="world" filename="libGstCameraSystem.so" name="custom::GstCameraSystem"/> -->
+```
+
+### Phase 3: Download Gazebo world models (one-time)
+
+```bash
+git clone https://github.com/PX4/PX4-gazebo-models.git ~/dev/px4-gazebo-models
+```
+
+### Phase 4: Start PX4 + Gazebo (each session)
+
+Save the following as a launch script (e.g. `~/start_px4.sh`) and run it in a
+dedicated terminal:
+
+```bash
+#!/bin/bash
+# ARM64 Ruby must come first — the `gz` wrapper is a Ruby script and macOS has
+# an x86_64 Ruby at /usr/local/bin/ruby that would load the wrong arch dylibs.
+export PATH=/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH
+export HEADLESS=1                    # skip Gazebo GUI (add a separate `gz sim -g` if you want it)
+export PX4_SYS_AUTOSTART=4001       # x500 quadrotor airframe
+export PX4_SIM_MODEL=gz_x500_mono_cam  # camera-equipped model (overrides autostart default of x500)
+export PX4_GZ_WORLD=default         # use 'default' world (fully local, no downloads)
+# All paths must be set explicitly — gz_env.sh is not sourced reliably at runtime
+export PX4_GZ_WORLDS=~/dev/PX4-Autopilot/Tools/simulation/gz/worlds
+export PX4_GZ_MODELS=~/dev/PX4-Autopilot/Tools/simulation/gz/models
+export PX4_GZ_PLUGINS=~/dev/PX4-Autopilot/build/px4_sitl_default/src/modules/simulation/gz_plugins
+export GZ_SIM_RESOURCE_PATH=$PX4_GZ_MODELS:$PX4_GZ_WORLDS
+export GZ_IP=127.0.0.1              # suppress multicast "No route to host" warnings on macOS
+export GZ_SIM_SYSTEM_PLUGIN_PATH=$PX4_GZ_PLUGINS
+export GZ_SIM_SERVER_CONFIG_PATH=~/dev/PX4-Autopilot/src/modules/simulation/gz_bridge/server.config
+cd ~/dev/PX4-Autopilot/build/px4_sitl_default
+./bin/px4 -s etc/init.d-posix/rcS
+```
+
+Wait ~15 seconds. Success looks like:
+
+```
+INFO  [init] Gazebo world is ready
+INFO  [init] Spawning Gazebo model
+INFO  [gz_bridge] world: default, model: x500_mono_cam_0
+INFO  [px4] Startup script returned successfully
+pxh>
+```
+
+Expected (non-fatal) warnings: `ekf2 missing data` (no sensor lock yet),
+`No connection to the GCS` (no ground station connected yet), Qt5 duplicate
+class warnings (two Qt5 installs coexist from Homebrew and Anaconda).
+`GZ_IP=127.0.0.1` suppresses the repeated `Exception sending a multicast message: No route to host`
+warnings (macOS loopback has no multicast route by default).
+
+
+PX4 SITL spawns both a px4 process and a gz sim server. Ctrl+C typically only kills the shell foreground process, leaving Gazebo orphaned. Kill both:                                                                                   
+
+```bash
+pkill -f "bin/px4" && pkill -f "gz sim"    
+```
+
+(optional) Verify the camera topic is publishing. The first command lists ALL topics getting published, the second dumps an image to the terminal.
+
+```bash
+GZ_IP=127.0.0.1 PATH=/opt/homebrew/opt/ruby/bin:$PATH gz topic -l
+GZ_IP=127.0.0.1 PATH=/opt/homebrew/opt/ruby/bin:$PATH gz topic -e -n 1 -t /world/default/model/x500_mono_cam_0/link/camera_link/sensor/camera/image
+```
+
+The above command should show: "/world/default/model/x500_mono_cam_0/link/camera_link/sensor/camera/image". If the topic path differs (e.g., model index `_1`), update
 `DRONE_GZ_CAMERA_TOPIC` in `drone_config.py`.
 
-### Phase 4: Install Python dependencies and gz-python
+### Phase 5: Install Python dependencies
 
 ```bash
 uv sync
-uv add gz-python   # gz-transport Python bindings
 ```
 
-> If `gz-python` is not available on PyPI for your platform, see the
-> [gz-python build-from-source guide](https://github.com/srmainwaring/gz-python).
+`gz-python` (the gz-transport Python bindings) is **not on PyPI**. It is installed
+automatically by `brew install gz-harmonic` into Homebrew's Python site-packages.
+The project uses Python 3.12, matching the Homebrew-installed bindings.
 
-### Phase 5: Fly the drone
+Create a `.env` file in the project root to tell `uv run` where to find the bindings:
+
+```bash
+# .env  (edit paths if your Homebrew prefix differs)
+PYTHONPATH=/opt/homebrew/lib/python3.12/site-packages
+DYLD_LIBRARY_PATH=/opt/homebrew/lib
+GZ_IP=127.0.0.1   # suppresses "No route to host" multicast warnings on macOS loopback
+```
+
+Verify the bindings are importable:
+
+```bash
+uv run --env-file .env python -c "import gz.transport13; print('OK')"
+```
+
+### Phase 6: Fly the drone
 
 `DRONE_CAMERA_SOURCE = "gz_transport"` is already the default in `drone_config.py`.
 
 ```bash
-uv run python drone_manage.py drive --myconfig=drone_config.py
+uv run --env-file .env python drone_manage.py drive --myconfig=drone_config.py
 ```
 
 Then open http://localhost:8887.
 
 ---
-
-## Docker Setup (No GPU)
-
-### 1. Create a Python 3.11 environment and install dependencies
-
-```bash
-cd mycar
-uv sync
-# us sync should cover packages, but if you prefer: uv add donkeycar mavsdk opencv-python-headless "tornado>=6.2" tensorflow
-```
-
-Set `DRONE_CAMERA_SOURCE = "rtsp"` in `drone_config.py` and uncomment
-`DRONE_RTSP_URL = "rtsp://127.0.0.1:8554/live"`.
-
-### 2. Pull the PX4 simulator Docker image (one-time, ~2GB)
-
-```bash
-docker pull jonasvautherin/px4-gazebo-headless:latest --platform linux/arm64
-
-# above arm64 build runs best for Mac, but for amd64 build: docker pull jonasvautherin/px4-gazebo-headless:1.16.1
-```
-
-
-### 2a download Gazebo worlds of interest
-
-git clone https://github.com/PX4/PX4-gazebo-models.git ~/dev/px4-gazebo-models
-
-### 3. Start the simulator
-
-# choose your Gazebo 8.10 world - walls, baylands, forest
-```bash
-  docker run --platform linux/arm64 --rm -d \
-    --name px4_sitl \
-    --cpus=3 \
-    --volume ~/dev/px4-gazebo-models/worlds:/root/px4/Tools/simulation/gz/worlds \
-    --volume ~/dev/px4-gazebo-models/models:/root/px4/Tools/simulation/gz/models \
-    -p 14540:14540/udp \
-    -p 14550:14550/udp \
-    -p 8554:8554 \
-    jonasvautherin/px4-gazebo-headless:latest \
-    -v gz_x500_mono_cam \
-    -w walls
-```
-
-Wait ~20 seconds for PX4 to boot, then verify:
-
-```bash
-docker logs px4_sitl 2>&1 | grep "Startup script returned"
-# Should show: INFO  [px4] Startup script returned successfully
-```
-
-### 4. Fly the drone (Docker mode)
-
-```bash
-uv run python drone_manage.py drive --myconfig=drone_config.py
-```
-
-Then open http://localhost:8887 in your browser.
-
-- Use the **steering slider** to yaw (turn left/right)
-- Use the **throttle slider** to fly forward/backward
-- The drone holds altitude automatically
-- Click **Start Recording** to capture training data
-
-### 5. Train a model
-
-```bash
-#.venv/bin/python train.py --tubs=data/<your_tub_folder> --model=models/drone_pilot.h5
-uv run python train.py --tubs=data/<your_tub_folder> --model=models/drone_pilot.h5
-```
-
-### 6. Fly with autopilot
-
-```bash
-uv run python drone_manage.py drive --myconfig=drone_config.py --model=models/drone_pilot.h5
-```
-
-Switch to **Local** mode in the web UI to let the CNN fly.
-
-## Stopping
-
-```bash
-# Stop the DonkeyCar process: Ctrl+C in the terminal
-
-# Stop the simulator
-docker stop px4_sitl
-```
 
 ## Configuration
 
@@ -258,7 +236,6 @@ Edit `drone_config.py` to adjust parameters:
 |-----------|---------|-------------|
 | `DRONE_CAMERA_SOURCE` | `"gz_transport"` | `"gz_transport"` (native macOS) or `"rtsp"` (Docker) |
 | `DRONE_GZ_CAMERA_TOPIC` | (x500_mono_cam default) | gz-transport topic for camera images (native mode) |
-| `DRONE_RTSP_URL` | `"rtsp://127.0.0.1:8554/live"` | RTSP stream URL (Docker mode only) |
 | `DRONE_MAX_FORWARD_VEL` | 2.0 | Max forward speed (m/s) at full throttle |
 | `DRONE_MAX_YAW_RATE` | 90.0 | Max yaw rate (deg/s) at full steering |
 | `DRONE_TARGET_ALTITUDE` | 3.0 | Altitude hold target (meters) |
@@ -269,14 +246,14 @@ Edit `drone_config.py` to adjust parameters:
 
 **Native macOS (gz-transport mode):**
 ```
-macOS Host
+macOS Host (Apple Silicon, ARM64)
 +----------------------------------------------+
 |                                              |
 | gz sim (Gazebo Harmonic, GPU-accelerated)    |
-|   +-- gz_x500_mono_cam (drone + camera)      |
+|   +-- x500_mono_cam_0 (drone + camera)       |
 |   +-- gz-transport: publishes /world/.../image|
 |                                              |
-| PX4 SITL (Rosetta x86 terminal)             |
+| PX4 SITL (native ARM64 binary)              |
 |   +-- gz_bridge (connects to Gazebo)         |
 |   +-- MAVLink on UDP 14540                   |
 |                                              |
@@ -291,24 +268,6 @@ macOS Host
 +----------------------------------------------+
 ```
 
-**Docker mode (RTSP):**
-```
-macOS Host                          Docker Container
-+----------------------------------+  +---------------------------+
-|                                  |  |                           |
-| drone_manage.py                  |  | PX4 SITL (autopilot)     |
-|   +-- DroneGymEnv                |  |   +-- Offboard mode      |
-|   |     +-- MAVSDK-Python -------|->|   +-- Failsafes          |
-|   |     |   (velocity cmds)      |  |                           |
-|   |     +-- OpenCV (RTSP) <------|--|-- Gazebo Classic          |
-|   |         (camera frames)      |  |     +-- gz_x500_mono_cam  |
-|   +-- LocalWebController         |  |     +-- RTSP on :8554     |
-|   +-- DriveMode                  |  |                           |
-|   +-- KerasLinear (CNN)          |  | UDP 14540: MAVLink        |
-|   +-- TubWriter                  |  | TCP 8554:  camera stream  |
-+----------------------------------+  +---------------------------+
-```
-
 ## Files
 
 | File | Purpose |
@@ -319,8 +278,6 @@ macOS Host                          Docker Container
 | `config.py`       | Base DonkeyCar config (shared, not modified)
 | `manage.py`       | Original car entry point (unchanged)
 
-
-
 ## Troubleshooting
 
 ### Native macOS (gz-transport mode)
@@ -329,16 +286,36 @@ macOS Host                          Docker Container
 [gz-python guide](https://github.com/srmainwaring/gz-python). Alternatively,
 switch to Docker mode: set `DRONE_CAMERA_SOURCE = "rtsp"` in `drone_config.py`.
 
-**Camera topic not found / blank frames**: Run `gz topic -l | grep camera` while
-Gazebo is running to confirm the exact topic name. Update `DRONE_GZ_CAMERA_TOPIC`
-in `drone_config.py` if the model index differs (e.g., `_1` instead of `_0`).
+**Camera topic not found / blank frames**: Run
+`PATH=/opt/homebrew/opt/ruby/bin:$PATH gz topic -l | grep camera` while Gazebo
+is running to confirm the exact topic name. Update `DRONE_GZ_CAMERA_TOPIC` in
+`drone_config.py` if the model index differs (e.g., `_1` instead of `_0`).
 
 **Metal crash with camera sensor** ([gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877)):
-Fall back to OpenGL by adding `--render-engine-gui-api-backend opengl` to the
-`gz sim` commands in Phase 3.
+Set `PX4_GZ_SIM_RENDER_ENGINE=ogre` in the launch script before starting PX4.
 
-**PX4 SITL build fails on macOS 15.x**: Try pinning a specific PX4 version. See
-[PX4 macOS dev setup docs](https://docs.px4.io/main/en/dev_setup/dev_env_mac).
+**`gz sim` fails to load plugins / "incompatible architecture"**: The `gz` Ruby
+wrapper must run under ARM64 Ruby. Ensure
+`PATH=/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH` is set before running
+any `gz` command. The x86_64 Ruby at `/usr/local/bin/ruby` will fail to dlopen
+ARM64 Gazebo libraries.
+
+**`ERROR [init] Gazebo gz sim not found`**: PX4's `px4-rc.gzsim` runs under `/bin/sh` which may
+not inherit PATH correctly on macOS, so it can't find `gz`. The source patch in
+`ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim` adds
+`PATH="/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH"` at the top. After patching,
+copy the file to `build/px4_sitl_default/etc/init.d-posix/px4-rc.gzsim` (no rebuild needed).
+
+**PX4 "Timed out waiting for Gazebo world" at build time**: Expected — the
+post-build self-test tries to connect to a running Gazebo. The binary is built
+correctly regardless.
+
+**Rebuild needed after `make` changes**: If you need to clean and rebuild:
+```bash
+rm -rf ~/dev/PX4-Autopilot/build/px4_sitl_default
+cd ~/dev/PX4-Autopilot && make px4_sitl gz_x500_mono_cam
+# Then recreate the libOpticalFlow.dylib symlink (see Phase 2)
+```
 
 ### Docker mode (RTSP)
 
@@ -365,14 +342,18 @@ cleanly. Wait a few seconds or restart the simulator.
 **Drone doesn't reach target altitude**: Under Rosetta emulation the sim runs slowly.
 Lower `DRONE_TARGET_ALTITUDE` in `drone_config.py` (e.g., to 3.0m).
 
-###### CPU usage too high on M1 Mac (Docker mode)
+###### Resource utilization too high
 
-Docker does not have access to the Mac's GPU. Native macOS setup resolves this.
-For Docker, these mitigations help:
+These settings can be adjusted to let the simulation run more slowly, consuming fewer resources.
 
-  | Change | CPU Savings | Trade-off |
-  |--------|-------------|-----------|
-  | `--cpus=3` on Docker | Caps container at 3 cores | Sim runs slower |
-  | `PX4_SIM_SPEED_FACTOR=0.5` | ~halves Gazebo load | Sim time 2x slower |
-  | `DRIVE_LOOP_HZ = 10` | Less host-side work | Fine for emulated SITL |
-  | RTSP buffer=1 + frame skip | Less OpenCV decode overhead | ~5 FPS camera |
+| Change | CPU Savings | Trade-off |
+|--------|-------------|-----------|
+| `PX4_SIM_SPEED_FACTOR=0.5` | ~halves Gazebo load | Sim time 2x slower |
+| `DRIVE_LOOP_HZ = 10` | Less host-side work | Fine for emulated SITL |
+| RTSP buffer=1 + frame skip | Less OpenCV decode overhead | ~5 FPS camera |
+
+
+## TODO:
+
+- DonkeyDrone runs Walls world, but can really just see gray and white - figure out why. Also consider Warehouse world which seems better for CNN training.
+- Also render speed seems slow, try to speed up for flyability (double check the above sections)

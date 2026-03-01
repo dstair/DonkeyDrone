@@ -51,7 +51,6 @@ DRONE_CAMERA_SOURCE = "gz_transport"
 # Worlds: "drone_course" (recommended — colorful), "walls" (gray), "default" (empty)
 DRONE_GZ_CAMERA_TOPIC = (
     "/world/drone_course/model/x500_mono_cam_0"
-    "/world/default/model/x500_mono_cam_0"
     "/link/camera_link/sensor/camera/image"
 )
 

@@ -218,7 +218,7 @@ uv run --env-file .env python -c "import gz.transport13; print('OK')"
 uv run --env-file .env python drone_manage.py drive --myconfig=drone_config.py
 ```
 
-Then open http://localhost:8887.
+Then open http://127.0.0.1:8887
 
 ---
 
@@ -309,6 +309,27 @@ cd ~/dev/PX4-Autopilot && make px4_sitl gz_x500_mono_cam
 ```
 
 ### General notes & troubleshooting.
+
+#### Steering zeroed at low throttle (can't yaw in place)
+
+DonkeyCar's web controller has car-specific logic that zeros steering when throttle
+is near zero (a car can't steer while stationary). This prevents the drone from
+yawing in place and makes it feel like turning barely works when you aren't also
+pushing forward.
+
+**Fix:** Comment out the deadzone check in the nipple.js `move` handler in
+`.venv/lib/python3.12/site-packages/donkeycar/parts/web_controller/templates/static/main.js`:
+
+```javascript
+// ~line 215 — comment out these three lines:
+// if (state.tele.user.throttle < .001) {
+//   state.tele.user.angle = 0
+// }
+```
+
+After patching, restart `drone_manage.py` and hard-refresh the web UI (Cmd+Shift+R).
+This patch lives inside `.venv/` and will be lost if you recreate the virtual
+environment.
 
 #### Resource utilization too high
 
@@ -418,7 +439,7 @@ before launching PX4.
 ## TODO:
 
 must have:
-- get drone actually moving and test.
+X get drone actually moving and test.
 - test training CNN.
 - Test
 

@@ -84,8 +84,8 @@ class AltitudePID:
 
 
 _GZ_CAMERA_TOPIC_DEFAULT = (
-    "/world/walls/model/x500_mono_cam_0"
-    "/link/camera_link/sensor/camera_sensor/image"
+    "/world/drone_course/model/x500_mono_cam_0"
+    "/link/camera_link/sensor/camera/image"
 )
 
 
@@ -299,19 +299,24 @@ class DroneGymEnv:
         asyncio.ensure_future(self._telemetry_position(drone))
         asyncio.ensure_future(self._telemetry_attitude(drone))
 
-        # Set initial setpoint before starting offboard mode
-        await drone.offboard.set_velocity_body(
-            VelocityBodyYawspeed(0.0, 0.0, 0.0, 0.0))
+        # PX4 requires offboard setpoints streaming at >2 Hz for ≥0.5 s
+        # before it accepts an OFFBOARD mode switch.  Send a warm-up burst.
+        logger.info("Sending offboard setpoint warm-up...")
+        for _ in range(20):                    # 1 s at 20 Hz
+            await drone.offboard.set_velocity_body(
+                VelocityBodyYawspeed(0.0, 0.0, 0.0, 0.0))
+            await asyncio.sleep(0.05)
 
         try:
             await drone.offboard.start()
             self._offboard_started = True
-            logger.info("Offboard mode started")
+            logger.info("Offboard mode started — drone is now accepting commands")
         except OffboardError as e:
             logger.error("Failed to start offboard mode: %s", e)
             return
 
         # Main control loop: send velocity commands based on steering/throttle
+        loop_count = 0
         while self.running:
             forward_vel = self.throttle * self.max_forward_vel
             yaw_rate = self.steering * self.max_yaw_rate
@@ -320,6 +325,16 @@ class DroneGymEnv:
 
             await drone.offboard.set_velocity_body(
                 VelocityBodyYawspeed(forward_vel, 0.0, down_vel, yaw_rate))
+
+            # Log control values every ~2 s so operator can verify inputs
+            loop_count += 1
+            if loop_count % 40 == 0:
+                logger.info(
+                    "ctrl: steer=%.2f thr=%.2f → fwd=%.1f m/s yaw=%.1f°/s "
+                    "alt=%.1f/%.1fm down_vel=%.2f",
+                    self.steering, self.throttle,
+                    forward_vel, yaw_rate,
+                    self.current_altitude, self.target_altitude, down_vel)
 
             # RTSP mode: poll for frames every other iteration to reduce CPU.
             # gz-transport mode: frames arrive via push callback; no polling needed.

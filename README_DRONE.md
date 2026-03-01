@@ -42,7 +42,7 @@ CNN model (KerasLinear), training pipeline, and data recording all work unchange
 
 ## Prerequisites
 
-- **Python 3.11**
+- **Python 3.12**
 - **uv**
 - **One of:**
   - **Native macOS** (recommended — GPU-accelerated): PX4 SITL + Gazebo Harmonic running natively on ARM64. See [Native macOS Setup](#native-macos-setup-gpu-accelerated) below.
@@ -50,13 +50,8 @@ CNN model (KerasLinear), training pipeline, and data recording all work unchange
 
 ## Native macOS Setup (GPU-Accelerated)
 
-Runs PX4 SITL and Gazebo Harmonic natively on Apple Silicon (ARM64). No Rosetta
-required. Uses the M1/M2 GPU for scene rendering — significantly lower CPU usage
-than Docker.
+Runs PX4 SITL and Gazebo Harmonic natively on Apple Silicon (ARM64). Tested on an M1 GPU for scene rendering. GPU (not supported by docker) was needed for acceptable performance.
 
-> **Known risk:** Metal camera sensor crash ([gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877))
-> may affect `gz_x500_mono_cam`. If you hit it, set `PX4_GZ_SIM_RENDER_ENGINE=ogre`
-> before launching PX4.
 
 ### Phase 1: Install dependencies (one-time)
 
@@ -134,28 +129,17 @@ git clone https://github.com/PX4/PX4-gazebo-models.git ~/dev/px4-gazebo-models
 
 ### Phase 4: Start PX4 + Gazebo (each session)
 
-Save the following as a launch script (e.g. `~/start_px4.sh`) and run it in a
-dedicated terminal:
+Symlink the DonkeyDrone course world into PX4's worlds directory (one-time):
 
 ```bash
-#!/bin/bash
-# ARM64 Ruby must come first — the `gz` wrapper is a Ruby script and macOS has
-# an x86_64 Ruby at /usr/local/bin/ruby that would load the wrong arch dylibs.
-export PATH=/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH
-export HEADLESS=1                    # skip Gazebo GUI (add a separate `gz sim -g` if you want it)
-export PX4_SYS_AUTOSTART=4001       # x500 quadrotor airframe
-export PX4_SIM_MODEL=gz_x500_mono_cam  # camera-equipped model (overrides autostart default of x500)
-export PX4_GZ_WORLD=default         # use 'default' world (fully local, no downloads)
-# All paths must be set explicitly — gz_env.sh is not sourced reliably at runtime
-export PX4_GZ_WORLDS=~/dev/PX4-Autopilot/Tools/simulation/gz/worlds
-export PX4_GZ_MODELS=~/dev/PX4-Autopilot/Tools/simulation/gz/models
-export PX4_GZ_PLUGINS=~/dev/PX4-Autopilot/build/px4_sitl_default/src/modules/simulation/gz_plugins
-export GZ_SIM_RESOURCE_PATH=$PX4_GZ_MODELS:$PX4_GZ_WORLDS
-export GZ_IP=127.0.0.1              # suppress multicast "No route to host" warnings on macOS
-export GZ_SIM_SYSTEM_PLUGIN_PATH=$PX4_GZ_PLUGINS
-export GZ_SIM_SERVER_CONFIG_PATH=~/dev/PX4-Autopilot/src/modules/simulation/gz_bridge/server.config
-cd ~/dev/PX4-Autopilot/build/px4_sitl_default
-./bin/px4 -s etc/init.d-posix/rcS
+ln -sf ~/dev/DonkeyDrone/worlds/drone_course.sdf \
+       ~/dev/PX4-Autopilot/Tools/simulation/gz/worlds/drone_course.sdf
+```
+
+[RUN COMMAND] Run the start script in a dedicated terminal:
+
+```bash
+bash ./px4_gazebo_start.sh
 ```
 
 Wait ~15 seconds. Success looks like:
@@ -163,33 +147,44 @@ Wait ~15 seconds. Success looks like:
 ```
 INFO  [init] Gazebo world is ready
 INFO  [init] Spawning Gazebo model
-INFO  [gz_bridge] world: default, model: x500_mono_cam_0
+INFO  [gz_bridge] world: walls, model: x500_mono_cam_0
 INFO  [px4] Startup script returned successfully
 pxh>
 ```
 
-Expected (non-fatal) warnings: `ekf2 missing data` (no sensor lock yet),
-`No connection to the GCS` (no ground station connected yet), Qt5 duplicate
-class warnings (two Qt5 installs coexist from Homebrew and Anaconda).
-`GZ_IP=127.0.0.1` suppresses the repeated `Exception sending a multicast message: No route to host`
-warnings (macOS loopback has no multicast route by default).
+Expected (non-fatal) warnings: 
+- `ekf2 missing data` (no sensor lock yet),
+- `No connection to the GCS` (no ground station connected yet), 
+- Qt5 duplicate class warnings (two Qt5 installs coexist from Homebrew and Anaconda).
+- `GZ_IP=127.0.0.1` solves noisy `Exception sending a multicast message: No route to host` warnings
 
 
-PX4 SITL spawns both a px4 process and a gz sim server. Ctrl+C typically only kills the shell foreground process, leaving Gazebo orphaned. Kill both:                                                                                   
-
-```bash
-pkill -f "bin/px4" && pkill -f "gz sim"    
-```
 
 (optional) Verify the camera topic is publishing. The first command lists ALL topics getting published, the second dumps an image to the terminal.
 
 ```bash
-GZ_IP=127.0.0.1 PATH=/opt/homebrew/opt/ruby/bin:$PATH gz topic -l
-GZ_IP=127.0.0.1 PATH=/opt/homebrew/opt/ruby/bin:$PATH gz topic -e -n 1 -t /world/default/model/x500_mono_cam_0/link/camera_link/sensor/camera/image
+GZ_IP=127.0.0.1  gz topic -l
+GZ_IP=127.0.0.1 gz topic -e -n 1 -t /world/default/model/x500_mono_cam_0/link/camera_link/sensor/camera/image
 ```
 
-The above command should show: "/world/default/model/x500_mono_cam_0/link/camera_link/sensor/camera/image". If the topic path differs (e.g., model index `_1`), update
+The above command should show: "/world/drone_course/model/x500_mono_cam_0/link/camera_link/sensor/camera/image". If the topic path differs (e.g., model index `_1` or a different world name), update
 `DRONE_GZ_CAMERA_TOPIC` in `drone_config.py`.
+
+
+[RUN COMMAND] Optional - open the Gazebo GUI:
+
+```bash
+export PATH="/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH" # add to ~/.zshrc 
+GZ_IP=127.0.0.1 gz sim -g &
+```
+
+#### Stopping everything
+
+This spans a number of process that Ctrl + C will not cleanly kill. To stop via a series of pkill commands:                                                                              
+
+```bash
+bash ./stop_all.sh
+```
 
 ### Phase 5: Install Python dependencies
 
@@ -197,9 +192,7 @@ The above command should show: "/world/default/model/x500_mono_cam_0/link/camera
 uv sync
 ```
 
-`gz-python` (the gz-transport Python bindings) is **not on PyPI**. It is installed
-automatically by `brew install gz-harmonic` into Homebrew's Python site-packages.
-The project uses Python 3.12, matching the Homebrew-installed bindings.
+`gz-python` (the gz-transport Python bindings) is **not on PyPI**. Install via `brew install gz-harmonic`.
 
 Create a `.env` file in the project root to tell `uv run` where to find the bindings:
 
@@ -207,7 +200,7 @@ Create a `.env` file in the project root to tell `uv run` where to find the bind
 # .env  (edit paths if your Homebrew prefix differs)
 PYTHONPATH=/opt/homebrew/lib/python3.12/site-packages
 DYLD_LIBRARY_PATH=/opt/homebrew/lib
-GZ_IP=127.0.0.1   # suppresses "No route to host" multicast warnings on macOS loopback
+GZ_IP=127.0.0.1   # suppresses noisy warning
 ```
 
 Verify the bindings are importable:
@@ -216,9 +209,10 @@ Verify the bindings are importable:
 uv run --env-file .env python -c "import gz.transport13; print('OK')"
 ```
 
-### Phase 6: Fly the drone
+### Run command 3
 
-`DRONE_CAMERA_SOURCE = "gz_transport"` is already the default in `drone_config.py`.
+
+[RUN COMMAND] run DonkeyDrone, the Web UI.
 
 ```bash
 uv run --env-file .env python drone_manage.py drive --myconfig=drone_config.py
@@ -235,7 +229,7 @@ Edit `drone_config.py` to adjust parameters:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `DRONE_CAMERA_SOURCE` | `"gz_transport"` | `"gz_transport"` (native macOS) or `"rtsp"` (Docker) |
-| `DRONE_GZ_CAMERA_TOPIC` | (x500_mono_cam default) | gz-transport topic for camera images (native mode) |
+| `DRONE_GZ_CAMERA_TOPIC` | (drone_course world default) | gz-transport topic for camera images (native mode) |
 | `DRONE_MAX_FORWARD_VEL` | 2.0 | Max forward speed (m/s) at full throttle |
 | `DRONE_MAX_YAW_RATE` | 90.0 | Max yaw rate (deg/s) at full steering |
 | `DRONE_TARGET_ALTITUDE` | 3.0 | Altitude hold target (meters) |
@@ -291,9 +285,6 @@ switch to Docker mode: set `DRONE_CAMERA_SOURCE = "rtsp"` in `drone_config.py`.
 is running to confirm the exact topic name. Update `DRONE_GZ_CAMERA_TOPIC` in
 `drone_config.py` if the model index differs (e.g., `_1` instead of `_0`).
 
-**Metal crash with camera sensor** ([gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877)):
-Set `PX4_GZ_SIM_RENDER_ENGINE=ogre` in the launch script before starting PX4.
-
 **`gz sim` fails to load plugins / "incompatible architecture"**: The `gz` Ruby
 wrapper must run under ARM64 Ruby. Ensure
 `PATH=/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH` is set before running
@@ -317,32 +308,9 @@ cd ~/dev/PX4-Autopilot && make px4_sitl gz_x500_mono_cam
 # Then recreate the libOpticalFlow.dylib symlink (see Phase 2)
 ```
 
-### Docker mode (RTSP)
+### General notes & troubleshooting.
 
-**"heartbeats timed out" warnings**: Normal when running PX4 SITL under Rosetta
-emulation on Apple Silicon. The sim clock is slower than realtime. The drone still
-flies correctly.
-
-**RTSP stream not opening**: Make sure port 8554 is mapped in the Docker run command.
-Verify with: `curl -v rtsp://127.0.0.1:8554/live` or test in Python:
-```python
-import cv2
-cap = cv2.VideoCapture("rtsp://127.0.0.1:8554/live")
-print(cap.isOpened())  # Should be True
-```
-
-**Docker container exits immediately**: Check RAM usage. PX4 + Gazebo under Rosetta
-needs ~4GB. Close other applications if needed.
-
-### General
-
-**"Address already in use" on port 14540**: A previous MAVSDK session didn't close
-cleanly. Wait a few seconds or restart the simulator.
-
-**Drone doesn't reach target altitude**: Under Rosetta emulation the sim runs slowly.
-Lower `DRONE_TARGET_ALTITUDE` in `drone_config.py` (e.g., to 3.0m).
-
-###### Resource utilization too high
+#### Resource utilization too high
 
 These settings can be adjusted to let the simulation run more slowly, consuming fewer resources.
 
@@ -353,7 +321,108 @@ These settings can be adjusted to let the simulation run more slowly, consuming 
 | RTSP buffer=1 + frame skip | Less OpenCV decode overhead | ~5 FPS camera |
 
 
+#### Worlds
+
+The default world is **`drone_course`** (`worlds/drone_course.sdf` in this repo).
+It provides high-contrast colored surfaces that a CNN can actually learn from:
+
+| Feature | Color | Purpose |
+|---------|-------|---------|
+| Ground | Dark green | Distinct from walls and sky |
+| Sky | Blue with clouds | Horizon reference |
+| Left wall | Red | Turn-left cue |
+| Back wall | Yellow | End-of-corridor cue |
+| Right walls | Blue | Turn-right cue |
+| Top wall | Orange | Boundary marker |
+| Pillars | White, purple | Interior landmarks |
+| Landing pad | Dark gray circle | Origin reference |
+
+The walls form an L-shaped corridor the drone can fly through, with each wall a
+different color so the CNN learns directional associations.
+
+To switch worlds, change `PX4_GZ_WORLD` in the launch script **and** update
+`DRONE_GZ_CAMERA_TOPIC` in `drone_config.py` to match. Other bundled PX4 worlds:
+`walls` (gray boxes), `lawn` (green ground, no obstacles), `default` (empty gray).
+
+
+#### Render Performance
+
+The mono_cam sensor renders at **1280x960 @ 30 Hz** natively, downscaled to
+160x120 in `drone_gym.py`.  If Gazebo CPU usage is too high:
+
+| Change | Where | Effect |
+|--------|-------|--------|
+| Lower `update_rate` to 15 | `PX4-Autopilot/.../mono_cam/model.sdf` | Halves render load; still >DRIVE_LOOP_HZ |
+| `PX4_SIM_SPEED_FACTOR=0.5` | Launch script env var | Halves Gazebo physics + render load |
+| `DRIVE_LOOP_HZ = 5` | `drone_config.py` | Fewer MAVSDK commands per second |
+| `HEADLESS=1` | Launch script (already set) | No GUI window rendering |
+
+### CNN Training size
+
+KerasLinear is fully size-agnostic. The CNN uses Flatten() after convolutions, so it adapts to any input resolution. The only change needed is setting IMAGE_W and IMAGE_H in drone_config.py
+
+At 640x480 the Dense(100) layer alone would have ~28M weights. At 720p it'd be ~85M. Training on a laptop would be noticeably slower.
+
+Trade-offs by resolution:                                                                                                       
+  ┌───────────────────┬────────┬──────────────────┬───────────────┬───────────────────────────────┐                                           
+  │    Resolution     │ Pixels │ CNN Flatten size │ Training cost │             Notes             │                                           
+  ├───────────────────┼────────┼──────────────────┼───────────────┼───────────────────────────────┤
+  │ 160x120 (default) │ 19K    │ ~18K params      │ Baseline      │ DonkeyCar car default         │                                           
+  ├───────────────────┼────────┼──────────────────┼───────────────┼───────────────────────────────┤                                           
+  │ 320x240           │ 77K    │ ~73K params      │ ~4x           │ Good middle ground            │                                           
+  ├───────────────────┼────────┼──────────────────┼───────────────┼───────────────────────────────┤                                           
+  │ 640x480           │ 307K   │ ~277K params     │ ~15x          │ Rich detail, heavier training │                                           
+  ├───────────────────┼────────┼──────────────────┼───────────────┼───────────────────────────────┤                                           
+  │ 1280x720          │ 922K   │ ~850K params     │ ~47x          │ Native 720p, very heavy       │                                           
+  └───────────────────┴────────┴──────────────────┴───────────────┴───────────────────────────────┘
+
+#### Cleaning Up Data
+
+Several locations accumulate data over time:
+
+| Location | Grows from | Typical size |
+|----------|-----------|--------------|
+| `data/` | DonkeyCar tub recordings (images + JSON per driving session) | ~1 MB per tub |
+| `~/.gz/fuel/` | Gazebo Fuel model cache (downloaded meshes/textures) | ~400 MB |
+| `~/.gz/auto_default.log` | Gazebo server log (appended each run) | grows over time |
+| `~/dev/PX4-Autopilot/build/` | PX4 build artifacts (not runtime, but large) | ~800 MB |
+
+```bash
+# Check sizes
+du -sh data/ ~/.gz/fuel/ ~/.gz/auto_default.log ~/dev/PX4-Autopilot/build/
+
+# Delete old tub recordings (keeps the data/ directory)
+rm -rf data/tub_*
+
+# Clear Gazebo Fuel model cache (will re-download if needed)
+rm -rf ~/.gz/fuel/
+
+# Truncate Gazebo log
+> ~/.gz/auto_default.log
+```
+
+**Safe to delete anytime:** `data/tub_*` (training data you've already used or don't need),
+`~/.gz/fuel/` (re-downloads on next run), `~/.gz/auto_default.log`.
+
+**Don't delete unless rebuilding:** `~/dev/PX4-Autopilot/build/` — takes ~10 min to rebuild.
+
+
+
+#### Known risk: Metal camera sensor crash 
+
+([gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877))
+may affect `gz_x500_mono_cam`. If you hit it, set `PX4_GZ_SIM_RENDER_ENGINE=ogre`
+before launching PX4.
+
+
 ## TODO:
 
-- DonkeyDrone runs Walls world, but can really just see gray and white - figure out why. Also consider Warehouse world which seems better for CNN training.
-- Also render speed seems slow, try to speed up for flyability (double check the above sections)
+must have:
+- get drone actually moving and test.
+- test training CNN.
+- Test
+
+nice to have:
+- Add randomization of worlds (wall locations, colors) for better CNN training
+- Add looping to train CNN on a variety of worlds
+- research other tasks that would be interesting to implement (CNN to scan/build a 3D model of an object, for example.)

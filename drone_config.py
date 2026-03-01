@@ -15,10 +15,22 @@
 # DroneGymEnv provides images directly, so use MOCK camera in DonkeyCar
 CAMERA_TYPE = "MOCK"
 
+# Image resolution for the CNN pipeline (overrides DonkeyCar's 160x120 default).
+# The Gazebo sensor renders at 1280x960; drone_gym.py resizes to these dimensions.
+# KerasLinear adapts to any size, but training cost scales with pixel count.
+IMAGE_W = 320
+IMAGE_H = 240
+
 # ---- Drive Train ----
 # No physical actuators; DroneGymEnv sends commands via MAVSDK
 DONKEY_GYM = False
 DRIVE_TRAIN_TYPE = "MOCK"
+
+# ---- Controller ----
+# Disable physical joystick — web UI only (base config enables XboxOneJoystick
+# by default, which overwrites web controller values with 0.0 when no gamepad
+# is connected).
+USE_JOYSTICK_AS_DEFAULT = False
 
 # ---- Drone Simulator ----
 USE_DRONE_SIM = True
@@ -34,10 +46,12 @@ DRONE_MAVSDK_ADDRESS = "udpin://0.0.0.0:14540"
 DRONE_CAMERA_SOURCE = "gz_transport"
 
 # gz-transport camera topic (native macOS mode).
-# The default matches gz_x500_mono_cam in the "walls" world.
-# Run `gz topic -l | grep camera` to confirm the topic on your setup.
+# Must match PX4_GZ_WORLD in your launch script. Run `gz topic -l | grep camera`
+# to confirm the topic on your setup.
+# Worlds: "drone_course" (recommended — colorful), "walls" (gray), "default" (empty)
 DRONE_GZ_CAMERA_TOPIC = (
-    "/world/walls/model/x500_mono_cam_0"
+    "/world/drone_course/model/x500_mono_cam_0"
+    "/world/default/model/x500_mono_cam_0"
     "/link/camera_link/sensor/camera/image"
 )
 

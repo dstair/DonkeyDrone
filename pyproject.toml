@@ -5,7 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
-    "donkeycar>=5.2.0",
+    "albumentations>=2.0.8",
+    "donkeycar @ git+https://github.com/dstair/donkeycar.git@feature/donkeydrone",
     "mavsdk>=3.15.3",
     "opencv-python-headless>=4.13.0.92",
     "tensorflow>=2.20.0",

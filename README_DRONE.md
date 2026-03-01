@@ -209,10 +209,9 @@ Verify the bindings are importable:
 uv run --env-file .env python -c "import gz.transport13; print('OK')"
 ```
 
-### Run command 3
+### Run DonkeyDrone
 
-
-[RUN COMMAND] run DonkeyDrone, the Web UI.
+[RUN COMMAND] run DonkeyDrone, the Web UI. This allows you to see the camera, provide inputs (fly the drone around) and record training data which will be used in the next step of the pipeline.
 
 ```bash
 uv run --env-file .env python drone_manage.py drive --myconfig=drone_config.py
@@ -221,6 +220,34 @@ uv run --env-file .env python drone_manage.py drive --myconfig=drone_config.py
 Then open http://127.0.0.1:8887
 
 ---
+
+## Running the training pipeline
+
+
+```bash
+uv run python train.py --tubs=data/tub_16_26-03-01 --model=models/pilot.h5
+```
+
+Once training completes, note the model outputs - models/\*.h5 and models/\*.tflite - needed for next step.
+
+If interested, you can optionally look at:
+- number of epochs. Did early stopping kick in?
+- val_loss and what epoch minimum loss occurred at.
+- number of samples it training and and validation datasets.
+
+
+## Testing the trained autopilot
+
+To test the autopilot model created in the previous step:
+
+```bash
+uv run --env-file .env \
+  python drone_manage.py \
+  drive --model=models/pilot.h5 \
+  --myconfig=drone_config.py
+```
+
+In the Web UI, switch to "local_angle" or "local" mode.
 
 ## Configuration
 
@@ -441,7 +468,7 @@ before launching PX4.
 must have:
 X get drone actually moving and test.
 - test training CNN.
-- Test
+- Test flying using the new autopilot
 
 nice to have:
 - Add randomization of worlds (wall locations, colors) for better CNN training

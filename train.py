@@ -7,9 +7,12 @@ Usage:
     train.py [--tubs=tubs] (--model=<model>)
     [--type=(linear|inferred|tensorrt_linear|tflite_linear)]
     [--comment=<comment>]
+    [--myconfig=<filename>]
 
 Options:
     -h --help              Show this screen.
+    --myconfig=filename    Specify myconfig file to use.
+                           [default: drone_config.py]
 """
 
 from docopt import docopt
@@ -19,7 +22,7 @@ from donkeycar.pipeline.training import train
 
 def main():
     args = docopt(__doc__)
-    cfg = dk.load_config()
+    cfg = dk.load_config(myconfig=args['--myconfig'])
     tubs = args['--tubs']
     model = args['--model']
     model_type = args['--type']

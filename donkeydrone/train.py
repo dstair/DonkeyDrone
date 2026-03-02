@@ -15,6 +15,7 @@ Options:
                            [default: drone_config.py]
 """
 
+import os
 from docopt import docopt
 import donkeycar as dk
 from donkeycar.pipeline.training import train
@@ -22,7 +23,7 @@ from donkeycar.pipeline.training import train
 
 def main():
     args = docopt(__doc__)
-    cfg = dk.load_config(myconfig=args['--myconfig'])
+    cfg = dk.load_config(config_path=os.path.join(os.path.dirname(__file__), 'config.py'), myconfig=args['--myconfig'])
     tubs = args['--tubs']
     model = args['--model']
     model_type = args['--type']

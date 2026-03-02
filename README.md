@@ -27,7 +27,7 @@ Camera frames  <--  DroneGymEnv  <--  Gazebo
                      or RTSP)          scene)
 ```
 
-Two camera modes (set `DRONE_CAMERA_SOURCE` in `drone_config.py`):
+Two camera modes (set `DRONE_CAMERA_SOURCE` in `donkeydrone/drone_config.py`):
 - **`gz_transport`** (default) — native macOS: Gazebo Harmonic publishes images
   on a gz-transport topic. GPU-accelerated via Metal/OpenGL. Requires `gz-python`.
 - **`rtsp`** — Docker mode: Gazebo Classic streams RTSP on port 8554. No GPU.
@@ -127,63 +127,13 @@ gz-transport for camera frames instead):
 git clone https://github.com/PX4/PX4-gazebo-models.git ~/dev/px4-gazebo-models
 ```
 
-### Phase 4: Start PX4 + Gazebo (each session)
+### Phase 4: One-time world setup
 
-Symlink the DonkeyDrone course world into PX4's worlds directory (one-time):
+Symlink the DonkeyDrone course world into PX4's worlds directory:
 
 ```bash
 ln -sf ~/dev/DonkeyDrone/worlds/drone_course.sdf \
        ~/dev/PX4-Autopilot/Tools/simulation/gz/worlds/drone_course.sdf
-```
-
-[RUN COMMAND] Run the start script in a dedicated terminal:
-
-```bash
-bash ./px4_gazebo_start.sh
-```
-
-Wait ~15 seconds. Success looks like:
-
-```
-INFO  [init] Gazebo world is ready
-INFO  [init] Spawning Gazebo model
-INFO  [gz_bridge] world: walls, model: x500_mono_cam_0
-INFO  [px4] Startup script returned successfully
-pxh>
-```
-
-Expected (non-fatal) warnings: 
-- `ekf2 missing data` (no sensor lock yet),
-- `No connection to the GCS` (no ground station connected yet), 
-- Qt5 duplicate class warnings (two Qt5 installs coexist from Homebrew and Anaconda).
-- `GZ_IP=127.0.0.1` solves noisy `Exception sending a multicast message: No route to host` warnings
-
-
-
-(optional) Verify the camera topic is publishing. The first command lists ALL topics getting published, the second dumps an image to the terminal.
-
-```bash
-GZ_IP=127.0.0.1  gz topic -l
-GZ_IP=127.0.0.1 gz topic -e -n 1 -t /world/default/model/x500_mono_cam_0/link/camera_link/sensor/camera/image
-```
-
-The above command should show: "/world/drone_course/model/x500_mono_cam_0/link/camera_link/sensor/camera/image". If the topic path differs (e.g., model index `_1` or a different world name), update
-`DRONE_GZ_CAMERA_TOPIC` in `drone_config.py`.
-
-
-[RUN COMMAND] Optional - open the Gazebo GUI:
-
-```bash
-export PATH="/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH" # add to ~/.zshrc 
-GZ_IP=127.0.0.1 gz sim -g &
-```
-
-#### Stopping everything
-
-This spans a number of process that Ctrl + C will not cleanly kill. To stop via a series of pkill commands:                                                                              
-
-```bash
-bash ./stop_all.sh
 ```
 
 ### Phase 5: Install Python dependencies
@@ -211,13 +161,38 @@ uv run --env-file .env python -c "import gz.transport13; print('OK')"
 
 ### Run DonkeyDrone
 
-[RUN COMMAND] run DonkeyDrone, the Web UI. This allows you to see the camera, provide inputs (fly the drone around) and record training data which will be used in the next step of the pipeline.
+A single `scripts/start.sh` script launches PX4 + Gazebo in the background, waits for readiness, then runs `donkeydrone/drone_manage.py` in the foreground. Ctrl+C stops everything cleanly (no orphan processes).
 
 ```bash
-uv run --env-file .env python drone_manage.py drive --myconfig=drone_config.py
+./scripts/start.sh                              # manual drive mode
+./scripts/start.sh --model=models/pilot.h5      # drive mode with CNN autopilot
 ```
 
+PX4 SITL output is logged to `logs/px4_sitl.log`.
+
 Then open http://127.0.0.1:8887
+
+**What `scripts/start.sh` does:**
+1. Sets all PX4/Gazebo environment variables
+2. Launches PX4 SITL in the background
+3. Waits up to 60s for MAVSDK port 14540 to become available
+4. Runs `donkeydrone/drone_manage.py` in the foreground
+5. On exit, calls `scripts/stop_all.sh` to kill all related processes
+
+(optional) Open the Gazebo GUI in a separate terminal while the sim is running:
+
+```bash
+GZ_IP=127.0.0.1 gz sim -g &
+```
+
+#### Stopping everything
+
+Ctrl+C in the `scripts/start.sh` terminal stops everything automatically. If processes are
+still running for any reason:
+
+```bash
+bash ./scripts/stop_all.sh
+```
 
 ---
 
@@ -225,7 +200,7 @@ Then open http://127.0.0.1:8887
 
 
 ```bash
-uv run python train.py --tubs=data/tub_[number]_[yy-mm-dd] --model=models/pilot.h5
+uv run python donkeydrone/train.py --tubs=data/tub_[number]_[yy-mm-dd] --model=models/pilot.h5
 ```
 
 Once training completes, note the model outputs - models/\*.h5 and models/\*.tflite - needed for next step.
@@ -241,17 +216,14 @@ If interested, you can optionally look at:
 To test the autopilot model created in the previous step:
 
 ```bash
-uv run --env-file .env \
-  python drone_manage.py \
-  drive --model=models/pilot.h5 \
-  --myconfig=drone_config.py
+./scripts/start.sh --model=models/pilot.h5
 ```
 
 In the Web UI, switch to "local_angle" or "local" mode.
 
 ## Configuration
 
-Edit `drone_config.py` to adjust parameters:
+Edit `donkeydrone/drone_config.py` to adjust parameters:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -293,11 +265,14 @@ macOS Host (Apple Silicon, ARM64)
 
 | File | Purpose |
 |------|---------|
-| `drone_manage.py` | Main entry point (replaces `manage.py` for drone use)
-| `drone_gym.py`    | DroneGymEnv part: MAVSDK + gz-transport/RTSP bridge to DonkeyCar
-| `drone_config.py` | Drone-specific configuration (camera source, flight params)
-| `config.py`       | Base DonkeyCar config (shared, not modified)
-| `manage.py`       | Original car entry point (unchanged)
+| `scripts/start.sh`        | Single-command launcher: starts PX4+Gazebo, runs drone_manage, cleans up on exit |
+| `scripts/stop_all.sh`     | Kills all PX4/Gazebo/MAVSDK processes |
+| `scripts/px4_gazebo_start.sh` | Standalone PX4+Gazebo launcher (used internally by `start.sh`) |
+| `donkeydrone/drone_manage.py` | Main entry point (replaces `manage.py` for drone use) |
+| `donkeydrone/drone_gym.py`    | DroneGymEnv part: MAVSDK + gz-transport/RTSP bridge to DonkeyCar |
+| `donkeydrone/drone_config.py` | Drone-specific configuration (camera source, flight params) |
+| `donkeydrone/config.py`       | Base DonkeyCar config (shared, not modified) |
+| `donkeydrone/manage.py`       | Original car entry point (unchanged) |
 
 ## Troubleshooting
 
@@ -305,12 +280,12 @@ macOS Host (Apple Silicon, ARM64)
 
 **`gz-python` not available via pip**: Build from source following the
 [gz-python guide](https://github.com/srmainwaring/gz-python). Alternatively,
-switch to Docker mode: set `DRONE_CAMERA_SOURCE = "rtsp"` in `drone_config.py`.
+switch to Docker mode: set `DRONE_CAMERA_SOURCE = "rtsp"` in `donkeydrone/drone_config.py`.
 
 **Camera topic not found / blank frames**: Run
 `PATH=/opt/homebrew/opt/ruby/bin:$PATH gz topic -l | grep camera` while Gazebo
 is running to confirm the exact topic name. Update `DRONE_GZ_CAMERA_TOPIC` in
-`drone_config.py` if the model index differs (e.g., `_1` instead of `_0`).
+`donkeydrone/drone_config.py` if the model index differs (e.g., `_1` instead of `_0`).
 
 **`gz sim` fails to load plugins / "incompatible architecture"**: The `gz` Ruby
 wrapper must run under ARM64 Ruby. Ensure
@@ -354,7 +329,7 @@ pushing forward.
 // }
 ```
 
-After patching, restart `drone_manage.py` and hard-refresh the web UI (Cmd+Shift+R).
+After patching, restart `donkeydrone/drone_manage.py` and hard-refresh the web UI (Cmd+Shift+R).
 This patch lives inside `.venv/` and will be lost if you recreate the virtual
 environment.
 
@@ -389,20 +364,20 @@ The walls form an L-shaped corridor the drone can fly through, with each wall a
 different color so the CNN learns directional associations.
 
 To switch worlds, change `PX4_GZ_WORLD` in the launch script **and** update
-`DRONE_GZ_CAMERA_TOPIC` in `drone_config.py` to match. Other bundled PX4 worlds:
+`DRONE_GZ_CAMERA_TOPIC` in `donkeydrone/drone_config.py` to match. Other bundled PX4 worlds:
 `walls` (gray boxes), `lawn` (green ground, no obstacles), `default` (empty gray).
 
 
 #### Render Performance
 
 The mono_cam sensor renders at **1280x960 @ 30 Hz** natively, downscaled to
-160x120 in `drone_gym.py`.  If Gazebo CPU usage is too high:
+160x120 in `donkeydrone/drone_gym.py`.  If Gazebo CPU usage is too high:
 
 | Change | Where | Effect |
 |--------|-------|--------|
 | Lower `update_rate` to 15 | `PX4-Autopilot/.../mono_cam/model.sdf` | Halves render load; still >DRIVE_LOOP_HZ |
 | `PX4_SIM_SPEED_FACTOR=0.5` | Launch script env var | Halves Gazebo physics + render load |
-| `DRIVE_LOOP_HZ = 5` | `drone_config.py` | Fewer MAVSDK commands per second |
+| `DRIVE_LOOP_HZ = 5` | `donkeydrone/drone_config.py` | Fewer MAVSDK commands per second |
 | `HEADLESS=1` | Launch script (already set) | No GUI window rendering |
 
 ### CNN Training size
@@ -467,8 +442,8 @@ before launching PX4.
 
 must have:
 X get drone actually moving and test.
-- test training CNN.
-- Test flying using the new autopilot
+X test training CNN.
+X Test flying using the new autopilot
 
 nice to have:
 - Add randomization of worlds (wall locations, colors) for better CNN training

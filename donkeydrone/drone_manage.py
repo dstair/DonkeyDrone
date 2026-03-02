@@ -17,6 +17,7 @@ Options:
     --myconfig=filename     Specify myconfig file to use.
                             [default: drone_config.py]
 """
+import os
 from docopt import docopt
 
 try:
@@ -644,7 +645,7 @@ def add_drivetrain(V, cfg):
 
 if __name__ == '__main__':
     args = docopt(__doc__)
-    cfg = dk.load_config(myconfig=args['--myconfig'])
+    cfg = dk.load_config(config_path=os.path.join(os.path.dirname(__file__), 'config.py'), myconfig=args['--myconfig'])
 
     if args['drive']:
         model_type = args['--type']

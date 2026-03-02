@@ -209,7 +209,11 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     # load and configure model for inference
     #
     if model_path:
-        kl = dk.utils.get_model_by_type(model_type, cfg)
+        if model_path.endswith('.pth'):
+            from torch_pilot import TorchPilot
+            kl = TorchPilot(input_shape=(cfg.IMAGE_DEPTH, cfg.IMAGE_H, cfg.IMAGE_W))
+        else:
+            kl = dk.utils.get_model_by_type(model_type, cfg)
 
         model_reload_cb = None
         if '.h5' in model_path or '.trt' in model_path or '.tflite' in \

@@ -194,13 +194,10 @@ bash ./scripts/stop_all.sh
 Once you have flown the drone for a bit, there will be a new "tub" in the `data/` folder. You can then use that data to train a CNN. Note, this could take a while. A "hello world" test on 300 images took 5 minutes on an M1 Mac:
 
 ```bash
-uv run python donkeydrone/train.py --tubs=data/tub_[number]_[yy-mm-dd] --model=models/pilot.h5
+uv run python donkeydrone/torch_train.py --tubs=data/tub_[number]_[yy-mm-dd] --model=models/pilot.pth
 ```
 
-Once training completes, note the model outputs:
-- models/\*.h5 
-- models/\*.tflite 
-These are needed for next step.
+Once training completes, note the model output: models/pilot.pth. It is needed for next step.
 
 If interested, you can optionally look at:
 - number of epochs. Did early stopping kick in?
@@ -213,7 +210,7 @@ If interested, you can optionally look at:
 To test the autopilot model created in the previous step:
 
 ```bash
-./scripts/start.sh --model=models/pilot.h5
+./scripts/start.sh --model=models/pilot.pth
 ```
 
 In the Web UI, switch to "local_angle" or "local" mode.
@@ -379,9 +376,15 @@ rm -rf data/tub_*
 
 ## TODO:
 
-nice to have:
-- performance acceleration for training on M1 mac.
+of interest :
+X performance acceleration for training on M1 mac. 
+- add xbox controller support.
+- swap out quadcopter type - in my planned build, can't see the rotors.
+- research improvements to CNN, though it already is quite impressive.
+
+
+lower priority :
 - try a different world.
 - Add randomization of worlds (wall locations, colors) for better CNN training
 - Add looping to train CNN on a variety of worlds
-- research other tasks that would be interesting to implement (CNN to scan/build a 3D model of an object, for example.)
+- research other tasks that would be interesting to implement (CNN to scan/build a 3D model of an object, for example; object scanning CNN)

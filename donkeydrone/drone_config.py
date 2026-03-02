@@ -59,7 +59,7 @@ DRONE_GZ_CAMERA_TOPIC = (
 
 # ---- Flight Parameters ----
 # Max forward velocity (m/s) when throttle = 1.0
-DRONE_MAX_FORWARD_VEL = 2.0
+DRONE_MAX_FORWARD_VEL = 1.0
 
 # Max yaw rate (deg/s) when steering = 1.0 or -1.0
 DRONE_MAX_YAW_RATE = 90.0
@@ -79,7 +79,7 @@ DRONE_RECORD_ATTITUDE = True
 DRONE_RECORD_VELOCITY = True
 
 # ---- Vehicle Loop ----
-DRIVE_LOOP_HZ = 10
+DRIVE_LOOP_HZ = 30
 
 # ---- Data Storage ----
 # Always create a new tub (drone schema differs from car schema)

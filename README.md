@@ -1,13 +1,13 @@
 # DonkeyDrone: CNN-Based Autonomous Drone Flight
 
-Fly a drone using the same DonkeyCar workflow: 
+Fly a drone using the same workflow as DonkeyCar:
 
-1. drive manually
+1. fly manually
 2. record data
 3. train a CNN
 4. fly autonomously
 
-This adapts DonkeyCar's pipeline to control a simulated drone in PX4 + Gazebo.
+This adapts DonkeyCar's pipeline to control a simulated drone in PX4 (flight controller firmware) + Gazebo (simulator).
 
 The drone flies at a fixed altitude, and the CNN learns to control forward velocity
 and yaw rate from camera images -- the same way DonkeyCar learns steering and throttle.
@@ -18,45 +18,42 @@ The drone uses the exact same DonkeyCar parts pipeline as a car:
 
 ```
 Web Controller  -->  DriveMode  -->  DroneGymEnv  -->  PX4 SITL + Gazebo
- (steering,          (user vs         (maps to           (flies the
+ (steering,          (user or         (maps to           (flies the
   throttle)           autopilot)       velocity            drone)
                                        commands)
 
 Camera frames  <--  DroneGymEnv  <--  Gazebo
- (160x120 RGB)      (gz-transport      (renders
-                     or RTSP)          scene)
+ (320x240 RGB)      (gz-transport)    (renders scene)
 ```
 
 Two camera modes (set `DRONE_CAMERA_SOURCE` in `donkeydrone/drone_config.py`):
 - **`gz_transport`** (default) — native macOS: Gazebo Harmonic publishes images
   on a gz-transport topic. GPU-accelerated via Metal/OpenGL. Requires `gz-python`.
-- **`rtsp`** — Docker mode: Gazebo Classic streams RTSP on port 8554. No GPU.
 
 **Semantic mapping:**
 - `steering [-1, 1]` = yaw rate (turn left/right)
 - `throttle [-1, 1]` = forward velocity (fly forward/backward)
-- altitude is held constant by a PID controller
+- altitude is held constant by a PID controller for simplicity; could be changed in the future.
 
-Since the Memory key names are identical to the car version, the web controller,
+Since Memory key names are identical to the car version, the web controller,
 CNN model (KerasLinear), training pipeline, and data recording all work unchanged.
 
 ## Prerequisites
 
-- **Python 3.12**
+- **Python 3.12** - gz harmonic only supports Python 3.12, 3.13, or 3.14
 - **uv**
-- **One of:**
-  - **Native macOS** (recommended — GPU-accelerated): PX4 SITL + Gazebo Harmonic running natively on ARM64. See [Native macOS Setup](#native-macos-setup-gpu-accelerated) below.
-  - **Docker Desktop**: Gazebo Classic + PX4 in a Linux container. No GPU access. See [Docker Setup](#docker-setup-no-gpu) below.
+- OS: This "should" run on any system that can run Gazebo, all required python packages, and PX4. However, it's only been tested on OSX Tahoe 26.3.
+
+Side note: the setup was very, very involved. I would recommend you use a coding agent to work through the various build failures you will invariably hit. Gazebo and PX4 were both quite tricky to get up and running, largely because they do so much and require so many dependences. Also - installing Gazebo/PX4 on Ubuntu was much faster and smoother than on OSX, FWIW. But the convenience of running everything on my regular laptop made this worthwhile.
 
 ## Native macOS Setup (GPU-Accelerated)
 
 Runs PX4 SITL and Gazebo Harmonic natively on Apple Silicon (ARM64). Tested on an M1 GPU for scene rendering. GPU (not supported by docker) was needed for acceptable performance.
 
+### Step 1: Install dependencies (one-time)
 
-### Phase 1: Install dependencies (one-time)
-
-All dependencies must come from the **ARM64 Homebrew** at `/opt/homebrew`. Do not
-use Rosetta or `/usr/local/bin/brew` for any of these.
+Dependencies must come from the **ARM64 Homebrew** at `/opt/homebrew`. Do not
+use Rosetta based HomeBrew (`/usr/local/bin/brew`).
 
 ```bash
 # PX4 build toolchain
@@ -75,7 +72,7 @@ brew install opencv
 gz sim --version   # should print: Gazebo Sim, version 8.x.x
 ```
 
-### Phase 2: Build PX4 SITL (one-time)
+### Step 2: Build PX4 SITL (one-time)
 
 ```bash
 git clone https://github.com/PX4/PX4-Autopilot.git --recursive ~/dev/PX4-Autopilot
@@ -101,7 +98,6 @@ running). The binary is complete. Verify:
 
 ```bash
 file build/px4_sitl_default/bin/px4
-# → Mach-O 64-bit executable arm64  ✓
 ```
 
 After building, create one symlink needed at runtime (the OpticalFlow plugin's
@@ -115,19 +111,19 @@ ln -sf ~/dev/PX4-Autopilot/build/px4_sitl_default/OpticalFlow/install/lib/libOpt
 
 Also comment out the GstCameraSystem plugin in
 `src/modules/simulation/gz_bridge/server.config` (GStreamer is not built; we use
-gz-transport for camera frames instead):
+gz-transport for camera frames instead; this avoids a dependency issue):
 
 ```xml
 <!-- <plugin entity_name="*" entity_type="world" filename="libGstCameraSystem.so" name="custom::GstCameraSystem"/> -->
 ```
 
-### Phase 3: Download Gazebo world models (one-time)
+### Step 3: Download Gazebo world models for PX4 (one-time)
 
 ```bash
 git clone https://github.com/PX4/PX4-gazebo-models.git ~/dev/px4-gazebo-models
 ```
 
-### Phase 4: One-time world setup
+### Step 4: One-time world setup
 
 Symlink the DonkeyDrone course world into PX4's worlds directory:
 
@@ -136,15 +132,13 @@ ln -sf ~/dev/DonkeyDrone/worlds/drone_course.sdf \
        ~/dev/PX4-Autopilot/Tools/simulation/gz/worlds/drone_course.sdf
 ```
 
-### Phase 5: Install Python dependencies
+### Step 5: Install Python dependencies
 
 ```bash
 uv sync
 ```
 
-`gz-python` (the gz-transport Python bindings) is **not on PyPI**. Install via `brew install gz-harmonic`.
-
-Create a `.env` file in the project root to tell `uv run` where to find the bindings:
+Create a `.env` file in the project root to tell `uv run` where to find the bindings. The below links assume you installed Python 3.12 via HomeBrew:
 
 ```bash
 # .env  (edit paths if your Homebrew prefix differs)
@@ -164,8 +158,8 @@ uv run --env-file .env python -c "import gz.transport13; print('OK')"
 A single `scripts/start.sh` script launches PX4 + Gazebo in the background, waits for readiness, then runs `donkeydrone/drone_manage.py` in the foreground. Ctrl+C stops everything cleanly (no orphan processes).
 
 ```bash
-./scripts/start.sh                              # manual drive mode
-./scripts/start.sh --model=models/pilot.h5      # drive mode with CNN autopilot
+./scripts/start.sh                              # manual drive mode to collect training data
+./scripts/start.sh --model=models/pilot.h5      # once you have an autopilot, launch with autopilot
 ```
 
 PX4 SITL output is logged to `logs/px4_sitl.log`.
@@ -173,13 +167,12 @@ PX4 SITL output is logged to `logs/px4_sitl.log`.
 Then open http://127.0.0.1:8887
 
 **What `scripts/start.sh` does:**
-1. Sets all PX4/Gazebo environment variables
-2. Launches PX4 SITL in the background
-3. Waits up to 60s for MAVSDK port 14540 to become available
-4. Runs `donkeydrone/drone_manage.py` in the foreground
-5. On exit, calls `scripts/stop_all.sh` to kill all related processes
+1. Launches PX4 SITL in the background
+2. Waits for PX4 SITL drone to be ready
+4. Runs `donkeydrone/drone_manage.py` which starts the Web UI
+5. On exit or Ctrl + C, calls `scripts/stop_all.sh` to kill all processes cleanly.
 
-(optional) Open the Gazebo GUI in a separate terminal while the sim is running:
+(optional) Open the Gazebo GUI in a separate terminal while the sim is running; useful for seeing the whole world in higher resolution:
 
 ```bash
 GZ_IP=127.0.0.1 gz sim -g &
@@ -198,17 +191,21 @@ bash ./scripts/stop_all.sh
 
 ## Running the training pipeline
 
+Once you have flown the drone for a bit, there will be a new "tub" in the `data/` folder. You can then use that data to train a CNN. Note, this could take a while. A "hello world" test on 300 images took 5 minutes on an M1 Mac:
 
 ```bash
 uv run python donkeydrone/train.py --tubs=data/tub_[number]_[yy-mm-dd] --model=models/pilot.h5
 ```
 
-Once training completes, note the model outputs - models/\*.h5 and models/\*.tflite - needed for next step.
+Once training completes, note the model outputs:
+- models/\*.h5 
+- models/\*.tflite 
+These are needed for next step.
 
 If interested, you can optionally look at:
 - number of epochs. Did early stopping kick in?
-- val_loss and what epoch minimum loss occurred at.
-- number of samples it training and and validation datasets.
+- val_loss and when minimum loss occurred at.
+- number of samples in training and and validation datasets.
 
 
 ## Testing the trained autopilot
@@ -227,7 +224,7 @@ Edit `donkeydrone/drone_config.py` to adjust parameters:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `DRONE_CAMERA_SOURCE` | `"gz_transport"` | `"gz_transport"` (native macOS) or `"rtsp"` (Docker) |
+| `DRONE_CAMERA_SOURCE` | `"gz_transport"` | `"gz_transport"` (native macOS) |
 | `DRONE_GZ_CAMERA_TOPIC` | (drone_course world default) | gz-transport topic for camera images (native mode) |
 | `DRONE_MAX_FORWARD_VEL` | 2.0 | Max forward speed (m/s) at full throttle |
 | `DRONE_MAX_YAW_RATE` | 90.0 | Max yaw rate (deg/s) at full steering |
@@ -307,33 +304,12 @@ correctly regardless.
 ```bash
 rm -rf ~/dev/PX4-Autopilot/build/px4_sitl_default
 cd ~/dev/PX4-Autopilot && make px4_sitl gz_x500_mono_cam
-# Then recreate the libOpticalFlow.dylib symlink (see Phase 2)
+# Then recreate the libOpticalFlow.dylib symlink (see Step 2)
 ```
 
 ### General notes & troubleshooting.
 
-#### Steering zeroed at low throttle (can't yaw in place)
-
-DonkeyCar's web controller has car-specific logic that zeros steering when throttle
-is near zero (a car can't steer while stationary). This prevents the drone from
-yawing in place and makes it feel like turning barely works when you aren't also
-pushing forward.
-
-**Fix:** Comment out the deadzone check in the nipple.js `move` handler in
-`.venv/lib/python3.12/site-packages/donkeycar/parts/web_controller/templates/static/main.js`:
-
-```javascript
-// ~line 215 — comment out these three lines:
-// if (state.tele.user.throttle < .001) {
-//   state.tele.user.angle = 0
-// }
-```
-
-After patching, restart `donkeydrone/drone_manage.py` and hard-refresh the web UI (Cmd+Shift+R).
-This patch lives inside `.venv/` and will be lost if you recreate the virtual
-environment.
-
-#### Resource utilization too high
+#### Resource utilization
 
 These settings can be adjusted to let the simulation run more slowly, consuming fewer resources.
 
@@ -341,44 +317,16 @@ These settings can be adjusted to let the simulation run more slowly, consuming 
 |--------|-------------|-----------|
 | `PX4_SIM_SPEED_FACTOR=0.5` | ~halves Gazebo load | Sim time 2x slower |
 | `DRIVE_LOOP_HZ = 10` | Less host-side work | Fine for emulated SITL |
-| RTSP buffer=1 + frame skip | Less OpenCV decode overhead | ~5 FPS camera |
-
+| Lower `update_rate` to 15 in `PX4-Autopilot/.../mono_cam/model.sdf` | Halves render load; still >DRIVE_LOOP_HZ | |
+| `HEADLESS=1` | Launch script (already set) | No GUI window rendering |
 
 #### Worlds
 
 The default world is **`drone_course`** (`worlds/drone_course.sdf` in this repo).
-It provides high-contrast colored surfaces that a CNN can actually learn from:
-
-| Feature | Color | Purpose |
-|---------|-------|---------|
-| Ground | Dark green | Distinct from walls and sky |
-| Sky | Blue with clouds | Horizon reference |
-| Left wall | Red | Turn-left cue |
-| Back wall | Yellow | End-of-corridor cue |
-| Right walls | Blue | Turn-right cue |
-| Top wall | Orange | Boundary marker |
-| Pillars | White, purple | Interior landmarks |
-| Landing pad | Dark gray circle | Origin reference |
-
-The walls form an L-shaped corridor the drone can fly through, with each wall a
-different color so the CNN learns directional associations.
+It provides high-contrast colored surfaces.
 
 To switch worlds, change `PX4_GZ_WORLD` in the launch script **and** update
-`DRONE_GZ_CAMERA_TOPIC` in `donkeydrone/drone_config.py` to match. Other bundled PX4 worlds:
-`walls` (gray boxes), `lawn` (green ground, no obstacles), `default` (empty gray).
-
-
-#### Render Performance
-
-The mono_cam sensor renders at **1280x960 @ 30 Hz** natively, downscaled to
-160x120 in `donkeydrone/drone_gym.py`.  If Gazebo CPU usage is too high:
-
-| Change | Where | Effect |
-|--------|-------|--------|
-| Lower `update_rate` to 15 | `PX4-Autopilot/.../mono_cam/model.sdf` | Halves render load; still >DRIVE_LOOP_HZ |
-| `PX4_SIM_SPEED_FACTOR=0.5` | Launch script env var | Halves Gazebo physics + render load |
-| `DRIVE_LOOP_HZ = 5` | `donkeydrone/drone_config.py` | Fewer MAVSDK commands per second |
-| `HEADLESS=1` | Launch script (already set) | No GUI window rendering |
+`DRONE_GZ_CAMERA_TOPIC` in `donkeydrone/drone_config.py` to match.
 
 ### CNN Training size
 
@@ -409,6 +357,8 @@ Several locations accumulate data over time:
 | `~/.gz/fuel/` | Gazebo Fuel model cache (downloaded meshes/textures) | ~400 MB |
 | `~/.gz/auto_default.log` | Gazebo server log (appended each run) | grows over time |
 | `~/dev/PX4-Autopilot/build/` | PX4 build artifacts (not runtime, but large) | ~800 MB |
+| `~/dev/PX4-Autopilot/build/px4_sitl_default/log/*` | flight log data | 100s of MB to GBs | 
+
 
 ```bash
 # Check sizes
@@ -416,9 +366,6 @@ du -sh data/ ~/.gz/fuel/ ~/.gz/auto_default.log ~/dev/PX4-Autopilot/build/
 
 # Delete old tub recordings (keeps the data/ directory)
 rm -rf data/tub_*
-
-# Clear Gazebo Fuel model cache (will re-download if needed)
-rm -rf ~/.gz/fuel/
 
 # Truncate Gazebo log
 > ~/.gz/auto_default.log
@@ -430,22 +377,11 @@ rm -rf ~/.gz/fuel/
 **Don't delete unless rebuilding:** `~/dev/PX4-Autopilot/build/` — takes ~10 min to rebuild.
 
 
-
-#### Known risk: Metal camera sensor crash 
-
-([gz-sim #2877](https://github.com/gazebosim/gz-sim/issues/2877))
-may affect `gz_x500_mono_cam`. If you hit it, set `PX4_GZ_SIM_RENDER_ENGINE=ogre`
-before launching PX4.
-
-
 ## TODO:
 
-must have:
-X get drone actually moving and test.
-X test training CNN.
-X Test flying using the new autopilot
-
 nice to have:
+- performance acceleration for training on M1 mac.
+- try a different world.
 - Add randomization of worlds (wall locations, colors) for better CNN training
 - Add looping to train CNN on a variety of worlds
 - research other tasks that would be interesting to implement (CNN to scan/build a 3D model of an object, for example.)

@@ -225,7 +225,7 @@ Then open http://127.0.0.1:8887
 
 
 ```bash
-uv run python train.py --tubs=data/tub_16_26-03-01 --model=models/pilot.h5
+uv run python train.py --tubs=data/tub_[number]_[yy-mm-dd] --model=models/pilot.h5
 ```
 
 Once training completes, note the model outputs - models/\*.h5 and models/\*.tflite - needed for next step.

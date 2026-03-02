@@ -28,8 +28,13 @@ Requires:
 
 import asyncio
 import logging
+import os
+import subprocess
+import sys
 import threading
 import time
+from multiprocessing.shared_memory import SharedMemory
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -148,8 +153,11 @@ class DroneGymEnv:
         self.running = True
         self._connected = False
         self._offboard_started = False
-        self._cap = None       # used by RTSP mode
-        self._gz_node = None   # used by gz-transport mode
+        self._cap = None            # used by RTSP mode
+        self._shm = None            # shared memory for gz-transport subprocess
+        self._camera_proc = None    # gz_camera_worker subprocess
+        self._last_seq = 0          # sequence counter for new-frame detection
+        self._frame_size = image_h * image_w * 3
         self._loop = None
         self._frame_skip = 0
 
@@ -192,68 +200,47 @@ class DroneGymEnv:
             self.frame = resized
 
     def _start_gz_camera(self):
-        """Subscribe to camera images via gz-transport (native macOS mode).
+        """Launch gz_camera_worker subprocess for gz-transport camera capture.
 
-        Requires gz-python: pip install gz-python
-        The subscription is callback-based; frames are pushed to self.frame
-        by _gz_image_callback() from gz-transport's internal thread.
+        The worker runs in a separate process to avoid libprotobuf conflicts
+        with TensorFlow. Frames are passed via shared memory.
 
         Find your exact topic name with:
             gz topic -l | grep camera
         """
-        logger.info("Subscribing to gz-transport camera topic: %s",
+        logger.info("Starting gz-transport camera subprocess for topic: %s",
                     self.gz_camera_topic)
-        try:
-            from gz.transport13 import Node
-            from gz.msgs10.image_pb2 import Image as GzImage
 
-            self._gz_node = Node()
-            ok = self._gz_node.subscribe(
-                GzImage, self.gz_camera_topic, self._gz_image_callback)
-            if ok:
-                logger.info("gz-transport subscription established")
-            else:
-                logger.warning(
-                    "Failed to subscribe to gz-transport topic '%s'. "
-                    "Check that Gazebo is running and the topic name is correct. "
-                    "Run: gz topic -l | grep camera",
-                    self.gz_camera_topic)
-        except ImportError:
-            logger.warning(
-                "gz-transport Python bindings not available. "
-                "Install with: pip install gz-python  "
-                "Camera images will be blank. "
-                "Alternatively, set DRONE_CAMERA_SOURCE='rtsp' for Docker mode.")
+        # Create shared memory: 1 byte seq counter + frame data
+        shm_size = 1 + self._frame_size
+        self._shm = SharedMemory(create=True, size=shm_size)
+        self._shm.buf[0] = 0  # initial sequence counter
+        logger.info("Created shared memory '%s' (%d bytes)",
+                    self._shm.name, shm_size)
 
-    def _gz_image_callback(self, msg):
-        """Called by gz-transport when a new camera image arrives (native mode).
+        # Locate the worker script next to this file
+        worker_path = str(Path(__file__).parent / "gz_camera_worker.py")
 
-        Decodes a gz.msgs Image protobuf message to a numpy RGB array and
-        resizes it to the configured DonkeyCar dimensions.
+        self._camera_proc = subprocess.Popen(
+            ["uv", "run", "--env-file", ".env",
+             "python", worker_path,
+             self.gz_camera_topic,
+             str(self.image_w), str(self.image_h),
+             self._shm.name],
+            env=os.environ.copy(),
+        )
+        logger.info("Camera worker started (PID %d)", self._camera_proc.pid)
 
-        Pixel format constants (gz.msgs PixelFormatType):
-            1 = L_INT8 (grayscale), 3 = RGB_INT8, 4 = RGBA_INT8, 5 = BGRA_INT8
-        """
-        try:
-            pixel_format = getattr(msg, 'pixel_format_type', 3)  # default RGB_INT8
-            if pixel_format == 1:  # L_INT8 grayscale
-                arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
-                    msg.height, msg.width)
-                arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2RGB)
-            elif pixel_format == 4:  # RGBA_INT8
-                arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
-                    msg.height, msg.width, 4)
-                arr = cv2.cvtColor(arr, cv2.COLOR_RGBA2RGB)
-            elif pixel_format == 5:  # BGRA_INT8
-                arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
-                    msg.height, msg.width, 4)
-                arr = cv2.cvtColor(arr, cv2.COLOR_BGRA2RGB)
-            else:  # RGB_INT8 (3) or unknown -- assume RGB
-                arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
-                    msg.height, msg.width, 3)
-            self.frame = cv2.resize(arr, (self.image_w, self.image_h))
-        except Exception as e:
-            logger.debug("Error processing gz image: %s", e)
+    def _read_gz_frame(self):
+        """Read the latest frame from shared memory if a new one is available."""
+        if self._shm is None:
+            return
+        seq = self._shm.buf[0]
+        if seq != self._last_seq:
+            self._last_seq = seq
+            frame_bytes = bytes(self._shm.buf[1:1 + self._frame_size])
+            self.frame = np.frombuffer(frame_bytes, dtype=np.uint8).reshape(
+                self.image_h, self.image_w, 3)
 
     async def _mavsdk_loop(self):
         """Main async loop: connect, arm, takeoff, then send offboard commands."""
@@ -403,6 +390,9 @@ class DroneGymEnv:
         self.steering = float(steering)
         self.throttle = float(throttle)
 
+        if self.camera_source == 'gz_transport':
+            self._read_gz_frame()
+
         outputs = [self.frame]
 
         if self.record_position:
@@ -423,5 +413,17 @@ class DroneGymEnv:
         time.sleep(1.0)
         if self._cap is not None:
             self._cap.release()
-        # gz-transport node unsubscribes when the object is garbage-collected
-        self._gz_node = None
+        # Terminate gz-transport camera subprocess
+        if self._camera_proc is not None:
+            logger.info("Terminating camera worker (PID %d)...",
+                        self._camera_proc.pid)
+            self._camera_proc.terminate()
+            try:
+                self._camera_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._camera_proc.kill()
+            self._camera_proc = None
+        if self._shm is not None:
+            self._shm.close()
+            self._shm.unlink()
+            self._shm = None

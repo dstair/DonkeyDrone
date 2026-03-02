@@ -368,7 +368,12 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
             ctr.print_controls()
 
     # Run the vehicle loop
-    V.start(rate_hz=cfg.DRIVE_LOOP_HZ, max_loop_count=cfg.MAX_LOOPS)
+    try:
+        V.start(rate_hz=cfg.DRIVE_LOOP_HZ, max_loop_count=cfg.MAX_LOOPS)
+    except BaseException as e:
+        logger.error("Vehicle loop exited with %s: %s", type(e).__name__, e)
+        import traceback
+        traceback.print_exc()
 
 
 # --- Helper classes reused from manage.py ---

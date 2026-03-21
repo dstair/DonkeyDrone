@@ -2,14 +2,16 @@
 DroneGymEnv - DonkeyCar part wrapping PX4 SITL + Gazebo via MAVSDK.
 
 This part connects to a PX4 SITL instance (Docker or native macOS) and provides
-the same interface as DonkeyGymEnv: it accepts (steering, throttle) inputs and
-produces camera images + telemetry outputs.
+the same interface as DonkeyGymEnv: it accepts (steering, throttle, altitude)
+inputs and produces camera images + telemetry outputs.
 
 The semantic mapping is:
     steering [-1, 1]  ->  yaw rate (deg/s)
     throttle [-1, 1]  ->  forward velocity (m/s)
+    altitude [-1, 1]  ->  altitude change rate (m/s), PID-stabilized
 
-Altitude is held constant by a simple PID controller.
+The altitude PID controller always runs for stability. The altitude input
+dynamically adjusts the PID's target altitude each frame.
 
 Camera sources (set DRONE_CAMERA_SOURCE in drone_config.py):
     "gz_transport"  Native macOS: subscribe to Gazebo Harmonic camera topic
@@ -104,11 +106,11 @@ class DroneGymEnv:
 
     This is a threaded part: update() runs the async MAVSDK event loop in a
     background thread, while run_threaded() is called by the Vehicle loop to
-    exchange steering/throttle commands and camera images.
+    exchange steering/throttle/altitude commands and camera images.
 
     Usage in manage.py:
         gym = DroneGymEnv(cfg)
-        V.add(gym, inputs=['steering', 'throttle'],
+        V.add(gym, inputs=['steering', 'throttle', 'altitude'],
               outputs=['cam/image_array', ...], threaded=True)
     """
 
@@ -118,6 +120,8 @@ class DroneGymEnv:
                  rtsp_url="rtsp://127.0.0.1:8554/live",
                  max_forward_vel=2.0, max_yaw_rate=90.0,
                  target_altitude=10.0,
+                 altitude_change_rate=1.0,
+                 min_altitude=1.0, max_altitude=20.0,
                  image_w=160, image_h=120,
                  altitude_pid=(0.5, 0.1, 0.2),
                  record_position=False,
@@ -131,6 +135,9 @@ class DroneGymEnv:
         self.max_forward_vel = max_forward_vel
         self.max_yaw_rate = max_yaw_rate
         self.target_altitude = target_altitude
+        self.altitude_change_rate = altitude_change_rate
+        self.min_altitude = min_altitude
+        self.max_altitude = max_altitude
         self.image_w = image_w
         self.image_h = image_h
         self.record_position = record_position
@@ -144,6 +151,7 @@ class DroneGymEnv:
         # Shared state between threads
         self.steering = 0.0
         self.throttle = 0.0
+        self.altitude = 0.0  # altitude control input [-1, 1]
         self.frame = np.zeros((image_h, image_w, 3), dtype=np.uint8)
         self.position = (0.0, 0.0, 0.0)
         self.attitude = (0.0, 0.0, 0.0)
@@ -160,6 +168,7 @@ class DroneGymEnv:
         self._frame_size = image_h * image_w * 3
         self._loop = None
         self._frame_skip = 0
+        self._last_ctrl_time = None
 
     def _start_camera(self):
         """Open RTSP stream from Gazebo (Docker mode)."""
@@ -302,9 +311,21 @@ class DroneGymEnv:
             logger.error("Failed to start offboard mode: %s", e)
             return
 
-        # Main control loop: send velocity commands based on steering/throttle
+        # Main control loop: send velocity commands based on steering/throttle/altitude
         loop_count = 0
         while self.running:
+            # Update target altitude based on altitude input
+            now = time.time()
+            if self._last_ctrl_time is not None:
+                dt = now - self._last_ctrl_time
+                dt = min(dt, 0.1)  # cap to avoid jumps after stalls
+                alt_input = self.altitude
+                if abs(alt_input) > 0.01:
+                    self.target_altitude += alt_input * self.altitude_change_rate * dt
+                    self.target_altitude = max(self.min_altitude,
+                                               min(self.max_altitude, self.target_altitude))
+            self._last_ctrl_time = now
+
             forward_vel = self.throttle * self.max_forward_vel
             yaw_rate = self.steering * self.max_yaw_rate
             down_vel = self.alt_pid.compute(self.target_altitude,
@@ -317,9 +338,9 @@ class DroneGymEnv:
             loop_count += 1
             if loop_count % 40 == 0:
                 logger.info(
-                    "ctrl: steer=%.2f thr=%.2f → fwd=%.1f m/s yaw=%.1f°/s "
+                    "ctrl: steer=%.2f thr=%.2f alt_in=%.2f → fwd=%.1f m/s yaw=%.1f°/s "
                     "alt=%.1f/%.1fm down_vel=%.2f",
-                    self.steering, self.throttle,
+                    self.steering, self.throttle, self.altitude,
                     forward_vel, yaw_rate,
                     self.current_altitude, self.target_altitude, down_vel)
 
@@ -374,21 +395,25 @@ class DroneGymEnv:
         finally:
             self._loop.close()
 
-    def run_threaded(self, steering, throttle):
+    def run_threaded(self, steering, throttle, altitude):
         """
         Called by the DonkeyCar Vehicle loop each frame.
 
         :param steering: normalized steering [-1, 1], mapped to yaw rate
         :param throttle: normalized throttle [-1, 1], mapped to forward velocity
+        :param altitude: normalized altitude [-1, 1], mapped to altitude change rate
         :return: camera image array + optional telemetry values
         """
         if steering is None:
             steering = 0.0
         if throttle is None:
             throttle = 0.0
+        if altitude is None:
+            altitude = 0.0
 
         self.steering = float(steering)
         self.throttle = float(throttle)
+        self.altitude = float(altitude)
 
         if self.camera_source == 'gz_transport':
             self._read_gz_frame()

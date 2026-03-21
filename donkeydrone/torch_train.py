@@ -59,6 +59,7 @@ class TubDataset(Dataset):
                                 'image_path': img_path,
                                 'angle': rec['user/angle'],
                                 'throttle': rec['user/throttle'],
+                                'altitude': rec.get('user/altitude', 0.0),
                             })
 
     def __len__(self):
@@ -71,7 +72,7 @@ class TubDataset(Dataset):
         # HWC uint8 → CHW float32 [0, 1]
         arr = np.array(img, dtype=np.float32) / 255.0
         tensor = torch.from_numpy(arr.transpose(2, 0, 1))
-        label = torch.tensor([rec['angle'], rec['throttle']], dtype=torch.float32)
+        label = torch.tensor([rec['angle'], rec['throttle'], rec['altitude']], dtype=torch.float32)
         return tensor, label
 
 

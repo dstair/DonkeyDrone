@@ -1,7 +1,7 @@
 """
 TorchPilot — drop-in replacement for KerasLinear in the DonkeyCar vehicle loop.
 
-Implements the same run(img_arr) → (steering, throttle) interface.
+Implements the same run(img_arr) → (steering, throttle, altitude) interface.
 """
 
 import numpy as np
@@ -35,7 +35,7 @@ class TorchPilot:
 
     def run(self, img_arr):
         if img_arr is None:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
 
         # img_arr: (H, W, C) uint8 numpy array from camera
         arr = np.asarray(img_arr, dtype=np.float32) / 255.0
@@ -47,4 +47,5 @@ class TorchPilot:
 
         steering = float(output[0, 0])
         throttle = float(output[0, 1])
-        return steering, throttle
+        altitude = float(output[0, 2])
+        return steering, throttle, altitude

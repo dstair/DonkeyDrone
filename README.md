@@ -9,8 +9,8 @@ Fly a drone using the same workflow as DonkeyCar:
 
 This adapts DonkeyCar's pipeline to control a simulated drone in PX4 (flight controller firmware) + Gazebo (simulator).
 
-The drone flies at a fixed altitude, and the CNN learns to control forward velocity
-and yaw rate from camera images -- the same way DonkeyCar learns steering and throttle.
+The CNN learns to control forward velocity, yaw rate, and altitude from camera
+images -- the same way DonkeyCar learns steering and throttle.
 
 ## How It Works
 
@@ -33,7 +33,7 @@ Two camera modes (set `DRONE_CAMERA_SOURCE` in `donkeydrone/drone_config.py`):
 **Semantic mapping:**
 - `steering [-1, 1]` = yaw rate (turn left/right)
 - `throttle [-1, 1]` = forward velocity (fly forward/backward)
-- altitude is held constant by a PID controller for simplicity; could be changed in the future.
+- `altitude [-1, 1]` = altitude change rate (Arrow Up/Down keys). PID controller tracks the dynamic target altitude for stability.
 
 Since Memory key names are identical to the car version, the web controller,
 CNN model (KerasLinear), training pipeline, and data recording all work unchanged.
@@ -44,7 +44,7 @@ CNN model (KerasLinear), training pipeline, and data recording all work unchange
 - **uv**
 - OS: This "should" run on any system that can run Gazebo, all required python packages, and PX4. However, it's only been tested on OSX Tahoe 26.3.
 
-Side note: the setup was very, very involved. I would recommend you use a coding agent to work through the various build failures you will invariably hit. Gazebo and PX4 were both quite tricky to get up and running, largely because they do so much and require so many dependences. Also - installing Gazebo/PX4 on Ubuntu was much faster and smoother than on OSX, FWIW. But the convenience of running everything on my regular laptop made this worthwhile.
+Side note: the setup was very intricate on OSX. I would recommend you use a coding agent to work through the various build failures you will likely hit. Gazebo and PX4 were both tricky to get up and running, largely because they are highly capable and require many dependencies. Also - installing Gazebo/PX4 on Ubuntu was much faster and smoother than on OSX. But the convenience of running everything on my regular laptop made this worthwhile.
 
 ## Native macOS Setup (GPU-Accelerated)
 
@@ -378,12 +378,16 @@ rm -rf data/tub_*
 
 of interest :
 X performance acceleration for training on M1 mac. 
-- add xbox controller support.
+- Switch drone flying from 2D to 3D. So, CNN needs to predict additional outputs, and drone can now change altitude.
 - swap out quadcopter type - in my planned build, can't see the rotors.
 - research improvements to CNN, though it already is quite impressive.
+  - proposal for VLA model and sending coordinates??
+- add xbox controller support.
 
 
 lower priority :
+- use ArduPilot instead of PX4??
+
 - try a different world.
 - Add randomization of worlds (wall locations, colors) for better CNN training
 - Add looping to train CNN on a variety of worlds

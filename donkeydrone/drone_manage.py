@@ -68,6 +68,9 @@ def add_drone_sim(V, cfg):
         max_forward_vel=cfg.DRONE_MAX_FORWARD_VEL,
         max_yaw_rate=cfg.DRONE_MAX_YAW_RATE,
         target_altitude=cfg.DRONE_TARGET_ALTITUDE,
+        altitude_change_rate=getattr(cfg, 'DRONE_ALTITUDE_CHANGE_RATE', 1.0),
+        min_altitude=getattr(cfg, 'DRONE_MIN_ALTITUDE', 1.0),
+        max_altitude=getattr(cfg, 'DRONE_MAX_ALTITUDE', 20.0),
         image_w=cfg.IMAGE_W,
         image_h=cfg.IMAGE_H,
         altitude_pid=(cfg.DRONE_ALTITUDE_KP,
@@ -78,7 +81,7 @@ def add_drone_sim(V, cfg):
         record_velocity=cfg.DRONE_RECORD_VELOCITY,
     )
 
-    inputs = ['steering', 'throttle']
+    inputs = ['steering', 'throttle', 'altitude']
     outputs = ['cam/image_array']
 
     if cfg.DRONE_RECORD_POSITION:
@@ -263,7 +266,7 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
             inputs = ['cam/image_array']
 
         # Model outputs
-        outputs = ['pilot/angle', 'pilot/throttle']
+        outputs = ['pilot/angle', 'pilot/throttle', 'pilot/altitude']
 
         if cfg.TRAIN_LOCALIZER:
             outputs.append("pilot/loc")
@@ -283,9 +286,9 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     # Decide steering and throttle based on user or autopilot mode
     #
     V.add(DriveMode(cfg.AI_THROTTLE_MULT),
-          inputs=['user/mode', 'user/angle', 'user/throttle',
-                  'pilot/angle', 'pilot/throttle'],
-          outputs=['steering', 'throttle'])
+          inputs=['user/mode', 'user/angle', 'user/throttle', 'user/altitude',
+                  'pilot/angle', 'pilot/throttle', 'pilot/altitude'],
+          outputs=['steering', 'throttle', 'altitude'])
 
     if (cfg.CONTROLLER_TYPE != "pigpio_rc") and (cfg.CONTROLLER_TYPE != "MM1"):
         if isinstance(ctr, JoystickController):
@@ -311,8 +314,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     #
     # Tub data recording
     #
-    inputs = ['cam/image_array', 'user/angle', 'user/throttle', 'user/mode']
-    types = ['image_array', 'float', 'float', 'str']
+    inputs = ['cam/image_array', 'user/angle', 'user/throttle', 'user/altitude', 'user/mode']
+    types = ['image_array', 'float', 'float', 'float', 'str']
 
     # Add drone telemetry to tub schema
     if getattr(cfg, 'USE_DRONE_SIM', False):
@@ -333,8 +336,8 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
                   'float', 'float', 'float']
 
     if cfg.RECORD_DURING_AI:
-        inputs += ['pilot/angle', 'pilot/throttle']
-        types += ['float', 'float']
+        inputs += ['pilot/angle', 'pilot/throttle', 'pilot/altitude']
+        types += ['float', 'float', 'float']
 
     tub_path = TubHandler(path=cfg.DATA_PATH).create_tub_path() if \
         cfg.AUTO_CREATE_NEW_TUB else cfg.DATA_PATH
@@ -361,7 +364,7 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
             camera_info = f"rtsp  {getattr(cfg, 'DRONE_RTSP_URL', 'rtsp://127.0.0.1:8554/live')}"
         print(f"  PX4 SITL:  {cfg.DRONE_MAVSDK_ADDRESS}")
         print(f"  Camera:    {camera_info}")
-        print(f"  Altitude:  {cfg.DRONE_TARGET_ALTITUDE}m")
+        print(f"  Altitude:  {cfg.DRONE_TARGET_ALTITUDE}m (takeoff), range [{getattr(cfg, 'DRONE_MIN_ALTITUDE', 1.0)}-{getattr(cfg, 'DRONE_MAX_ALTITUDE', 20.0)}]m")
         print(f"  Max speed: {cfg.DRONE_MAX_FORWARD_VEL} m/s")
         print(f"  Max yaw:   {cfg.DRONE_MAX_YAW_RATE} deg/s")
     print(f"  Web UI:    http://localhost:{cfg.WEB_CONTROL_PORT}")
@@ -428,14 +431,17 @@ class DriveMode:
         self.ai_throttle_mult = ai_throttle_mult
 
     def run(self, mode,
-            user_steering, user_throttle,
-            pilot_steering, pilot_throttle):
+            user_steering, user_throttle, user_altitude,
+            pilot_steering, pilot_throttle, pilot_altitude):
         if mode == 'user':
-            return user_steering, user_throttle
+            return user_steering, user_throttle, user_altitude if user_altitude else 0.0
         elif mode == 'local_angle':
-            return pilot_steering if pilot_steering else 0.0, user_throttle
+            return (pilot_steering if pilot_steering else 0.0,
+                    user_throttle,
+                    user_altitude if user_altitude else 0.0)
         return (pilot_steering if pilot_steering else 0.0,
-                pilot_throttle * self.ai_throttle_mult if pilot_throttle else 0.0)
+                pilot_throttle * self.ai_throttle_mult if pilot_throttle else 0.0,
+                pilot_altitude if pilot_altitude else 0.0)
 
 
 class UserPilotCondition:
@@ -559,8 +565,8 @@ def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
     ctr = LocalWebController(port=cfg.WEB_CONTROL_PORT, mode=cfg.WEB_INIT_MODE)
     V.add(ctr,
           inputs=[input_image, 'tub/num_records', 'user/mode', 'recording'],
-          outputs=['user/steering', 'user/throttle', 'user/mode', 'recording',
-                   'web/buttons'],
+          outputs=['user/steering', 'user/throttle', 'user/altitude',
+                   'user/mode', 'recording', 'web/buttons'],
           threaded=True)
 
     if use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:

@@ -8,7 +8,7 @@
 # semantic mapping:
 #   steering [-1, 1]  ->  yaw rate
 #   throttle [-1, 1]  ->  forward velocity
-#   altitude           ->  held constant by PID controller
+#   altitude [-1, 1]  ->  altitude change rate (PID-stabilized)
 # """
 
 # ---- Camera ----
@@ -64,13 +64,23 @@ DRONE_MAX_FORWARD_VEL = 1.0
 # Max yaw rate (deg/s) when steering = 1.0 or -1.0
 DRONE_MAX_YAW_RATE = 90.0
 
-# Target altitude (meters) for altitude hold
+# Target altitude (meters) for initial takeoff altitude
 DRONE_TARGET_ALTITUDE = 3.0     # Lower for emulated SITL (slow sim clock)
 
 # Altitude hold PID gains (kp, ki, kd)
 DRONE_ALTITUDE_KP = 0.5
 DRONE_ALTITUDE_KI = 0.1
 DRONE_ALTITUDE_KD = 0.2
+
+# 3D flight: altitude change rate (m/s) when altitude input = 1.0
+DRONE_ALTITUDE_CHANGE_RATE = 1.0
+
+# Altitude step size per arrow key press (normalized [-1, 1] units)
+DRONE_ALTITUDE_STEP = 0.15
+
+# Altitude bounds (meters) — clamped to prevent flying too high or crashing
+DRONE_MIN_ALTITUDE = 1.0
+DRONE_MAX_ALTITUDE = 20.0
 
 # ---- Telemetry Recording ----
 # Record additional drone telemetry in tubs alongside images

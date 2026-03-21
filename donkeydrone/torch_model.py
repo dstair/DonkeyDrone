@@ -1,9 +1,9 @@
 """
 PyTorch CNN matching the DonkeyCar KerasLinear architecture.
 
-5 Conv2d layers (valid padding, ReLU, Dropout 0.2) → Flatten → Dense(100) → Dense(50) → Linear(2)
+5 Conv2d layers (valid padding, ReLU, Dropout 0.2) → Flatten → Dense(100) → Dense(50) → Linear(3)
 Input:  (B, 3, H, W) float32 [0, 1]
-Output: (B, 2) — [steering, throttle]
+Output: (B, 3) — [steering, throttle, altitude]
 """
 
 import torch
@@ -46,7 +46,7 @@ class LinearModel(nn.Module):
             nn.Linear(100, 50),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(50, 2),
+            nn.Linear(50, 3),
         )
 
     def forward(self, x):

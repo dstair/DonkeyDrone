@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Summary
 
-DonkeyDrone adapts the DonkeyCar pipeline to fly a simulated quadrotor drone using a CNN trained from camera images. Workflow: manually fly → record data → train CNN → fly autonomously. Runs on PX4 SITL + Gazebo Harmonic, native Apple Silicon (ARM64).
+DonkeyDrone adapts the DonkeyCar pipeline to fly a simulated quadrotor drone using a CNN trained from camera images. Workflow: manually fly → record data → train CNN → fly autonomously. Runs on BetaFlight SITL + Gazebo Harmonic, native Apple Silicon (ARM64).
 
-**Semantic mapping** (identical key names to DonkeyCar):
+**Semantic mapping** (identical key names to DonkeyCar, BetaFlight Angle mode):
 - `steering [-1, 1]` = yaw rate
-- `throttle [-1, 1]` = forward velocity
-- `altitude [-1, 1]` = altitude change rate (PID-stabilized)
+- `throttle [-1, 1]` = forward pitch (tilt angle)
+- `altitude [-1, 1]` = motor throttle (direct power, no PID)
 
 ## Commands
 
@@ -23,7 +23,7 @@ uv sync
 # Launch (autopilot)
 ./scripts/start.sh --model=models/pilot.pth
 
-# Run without start.sh
+# Run without start.sh (BetaFlight SITL + Gazebo must already be running)
 uv run --env-file .env python -W ignore::SyntaxWarning donkeydrone/drone_manage.py drive --myconfig=drone_config.py
 
 # Train CNN
@@ -36,7 +36,7 @@ uv run python donkeydrone/torch_train.py --tubs=data/tub_1_26-03-01,data/tub_2_2
 bash ./scripts/stop_all.sh
 
 # Force kill
-pkill -9 -f "bin/px4"; pkill -9 -f "gz sim"; pkill -9 -f "ruby.*gz"; pkill -f mavsdk_server
+pkill -9 -f betaflight_SITL; pkill -9 -f "gz sim"; pkill -9 -f "ruby.*gz"
 
 # Verify gz-python works
 uv run --env-file .env python -c "import gz.transport13; print('OK')"
@@ -62,23 +62,35 @@ LocalWebController (tornado) → user/steering, user/throttle, user/altitude, us
 DriveMode (selects user vs autopilot)
     ↓
 DroneGymEnv (threaded DonkeyCar part)
-  ├── update(): background thread with asyncio MAVSDK loop
-  │     → PX4 SITL (UDP 14540): arm, takeoff, offboard velocity cmds
-  │     → AltitudePID: tracks dynamic target altitude
+  ├── update(): background thread with BetaFlight RC loop (50Hz UDP)
+  │     → BetaFlight SITL (UDP 9004): RC channel packets (arm, pitch, yaw, throttle)
+  │     → Direct throttle control (no PID), Angle mode stabilization by BetaFlight
   ├── gz_camera_worker.py: separate subprocess for camera frames
   │     → subscribes to gz-transport topic
   │     → writes frames to POSIX shared memory (1-byte seq + RGB pixels)
-  └── run_threaded(): reads shared memory, returns cam/image_array
+  └── run_threaded(): reads shared memory, applies simulated delay, returns cam/image_array
     ↓ (autopilot mode)
 TorchPilot (LinearModel CNN inference)
     ↓
 TubWriter (records to data/)
 ```
 
+### BetaFlight SITL Protocol
+
+| Port | Direction | Purpose |
+|------|-----------|---------|
+| 9002 | SITL → Gazebo | Motor speeds [0-1] (Gazebo plugin) |
+| 9003 | Gazebo → SITL | FDM state: IMU, position, orientation |
+| **9004** | **Us → SITL** | **RC channels (16x uint16, 1000-2000 μs PWM)** |
+| 5761 | TCP | Configurator (setup only) |
+
+RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` = 40 bytes
+
 ### Key design decisions
 
 - **gz_camera_worker runs as a subprocess** (not thread) to avoid libprotobuf version conflicts between gz-python and TensorFlow/PyTorch
 - **Shared memory IPC**: parent creates POSIX SharedMemory, worker writes frames with a sequence counter, parent polls counter in `run_threaded()` for zero-copy reads
+- **Direct throttle**: no altitude PID — `altitude [-1,1]` maps to motor power, matching real BetaFlight Angle mode behavior for CNN transferability
 - **Config system** (DonkeyCar pattern): `dk.load_config(config_path='config.py', myconfig='drone_config.py')` — edit `drone_config.py`, never `config.py`
 
 ## Key Files
@@ -86,16 +98,29 @@ TubWriter (records to data/)
 | File | Purpose |
 |------|---------|
 | `donkeydrone/drone_manage.py` | Main entry point |
-| `donkeydrone/drone_gym.py` | DroneGymEnv: MAVSDK + camera bridge |
+| `donkeydrone/drone_gym.py` | DroneGymEnv: BetaFlight RC UDP + camera bridge |
 | `donkeydrone/drone_config.py` | Drone config overrides (**edit this one**) |
 | `donkeydrone/config.py` | Base DonkeyCar config (**do not modify**) |
 | `donkeydrone/gz_camera_worker.py` | Subprocess: gz-transport camera → shared memory |
 | `donkeydrone/torch_model.py` | CNN architecture (LinearModel, PyTorch) |
 | `donkeydrone/torch_pilot.py` | Inference wrapper for vehicle loop |
 | `donkeydrone/torch_train.py` | Training script |
-| `scripts/start.sh` | One-command launcher |
+| `scripts/start.sh` | One-command launcher (Gazebo + BetaFlight + drone_manage) |
 | `scripts/stop_all.sh` | Force-kill all processes |
-| `worlds/drone_course.sdf` | Custom Gazebo world with colored walls |
+| `worlds/drone_course.sdf` | Custom Gazebo world with colored walls + drone model |
+
+### External Files (outside this repo)
+
+| File | Purpose |
+|------|---------|
+| `~/dev/aeroloop_gazebo/` | BetaFlight-Gazebo bridge plugin repo (gz branch) |
+| `~/dev/aeroloop_gazebo/plugins/BetaflightPlugin.cc` | Bridge plugin source: UDP 9002/9003 between BetaFlight ↔ Gazebo |
+| `~/dev/aeroloop_gazebo/plugins/build/libBetaflightPlugin.dylib` | Compiled plugin loaded by Gazebo at runtime |
+| `~/dev/aeroloop_gazebo/models/betaloop_drone_cam/` | Quadrotor model: iris body + 4 rotors + LiftDrag + IMU + forward camera |
+| `~/dev/aeroloop_gazebo/models/betaloop_drone_cam/model.sdf` | Model definition (BetaflightPlugin config, rotor mapping, camera sensor) |
+| `~/dev/betaflight/` | BetaFlight firmware source (SITL target) |
+| `~/dev/betaflight/obj/main/betaflight_SITL.elf` | Compiled BetaFlight SITL binary |
+| `~/.gz/sim/8/server.config` | Gazebo default server plugins (Physics, UserCommands, SceneBroadcaster) |
 
 ## Camera Modes
 
@@ -112,12 +137,82 @@ Controlled by `DRONE_CAMERA_SOURCE` in `donkeydrone/drone_config.py`:
 ## Important Config Parameters (`donkeydrone/drone_config.py`)
 
 - `DRONE_GZ_CAMERA_TOPIC`: must match world name — update when switching worlds
-- `PX4_GZ_WORLD` in `scripts/start.sh`: must also be updated when switching worlds
+- `GZ_WORLD` env var in `scripts/start.sh`: must also be updated when switching worlds (default: `drone_course`)
+- `BETAFLIGHT_RC_HOST`/`BETAFLIGHT_RC_PORT`: BetaFlight SITL RC endpoint (default 127.0.0.1:9004)
+- `DRONE_HOVER_THROTTLE`: PWM midpoint for hover (default 1500)
+- `DRONE_THROTTLE_RANGE`: altitude [-1,1] maps to ±this around hover (default 300)
+- `DRONE_MAX_PITCH_ANGLE`: max pitch degrees for forward tilt (default 25.0)
+- `SIMULATED_DELAY_MS`: simulated camera delay in ms (0=off)
+- `MEASURE_LOOP_DELAY`: log vehicle loop timing stats
 - `IMAGE_W`/`IMAGE_H`: camera resolution for CNN pipeline (default 320×240)
 - `DRIVE_LOOP_HZ`: vehicle loop frequency
 
 ## External Dependencies (not in pyproject.toml)
 
-- PX4 SITL binary: `~/dev/PX4-Autopilot/build/px4_sitl_default/bin/px4`
+- BetaFlight SITL binary: `~/dev/betaflight/obj/main/betaflight_SITL.elf` (override with `BETAFLIGHT_SITL_BIN` env var)
+  - Source: `~/dev/betaflight/` — build with `make TARGET=SITL` (needs dummy ARM SDK dir, see README)
+- aeroloop_gazebo: BetaFlight-Gazebo bridge plugin — set `AEROLOOP_GAZEBO_DIR` env var
+  - Source: `~/dev/aeroloop_gazebo/` (gz branch) — build: `cd plugins && mkdir build && cd build && cmake .. -DCMAKE_PREFIX_PATH="/opt/homebrew;/opt/homebrew/opt/qt@5" && make`
+  - Plugin: `libBetaflightPlugin.dylib` — loaded via `GZ_SIM_SYSTEM_PLUGIN_PATH` (set by start.sh)
 - Gazebo Harmonic: `brew install gz-harmonic` (ARM64 Homebrew only)
 - ARM64 Ruby required for gz CLI wrapper: `/opt/homebrew/opt/ruby/bin/ruby`
+
+## Gazebo World & Drone Model
+
+`worlds/drone_course.sdf` includes:
+- Colored wall course (red, yellow, blue, orange) with landmark pillars
+- `<include>` for `betaloop_drone_cam` model (resolved via `GZ_SIM_RESOURCE_PATH`)
+- `Sensors` plugin (ogre2 render engine — required for camera topic to publish)
+- `Imu` plugin (required for IMU sensor data to reach BetaflightPlugin)
+
+The `betaloop_drone_cam` model (`~/dev/aeroloop_gazebo/models/betaloop_drone_cam/model.sdf`) contains:
+- Iris quadrotor body (0.4kg) with 4 rotors + LiftDrag aerodynamics
+- Forward-facing camera (640×480, 30Hz, 80° FOV) on `camera_link`
+- IMU sensor on `iris/imu_link` (1000Hz, NED-rotated)
+- BetaflightPlugin with rotor-to-joint mapping (BF QUADX motor order)
+- Camera topic: `/world/drone_course/model/betaloop_drone_cam/link/camera_link/sensor/camera/image`
+
+### BetaflightPlugin Rotor Mapping
+
+BetaFlight QUADX `motor_speed[]` index → physical rotor joint:
+| BF Motor | Position | Direction | Joint |
+|----------|----------|-----------|-------|
+| 0 | Rear-Right | CW | `rotor_3_joint` |
+| 1 | Front-Right | CCW | `rotor_0_joint` |
+| 2 | Rear-Left | CCW | `rotor_1_joint` |
+| 3 | Front-Left | CW | `rotor_2_joint` |
+
+## Gotchas & Troubleshooting
+
+### Gazebo on macOS requires separate server and GUI processes
+`gz sim` cannot run server + GUI in one process on macOS ([gz-sim#44](https://github.com/gazebosim/gz-sim/issues/44)). `start.sh` launches `gz sim -s` (server) then `gz sim -g` (GUI) separately. Set `GZ_HEADLESS=1` to skip the GUI.
+
+### Stale gz-transport topics
+After killing Gazebo, camera topics can persist in gz-transport's multicast discovery cache for several minutes. The readiness check in `start.sh` matches the specific `betaloop_drone_cam` topic to avoid false positives from stale topics.
+
+### Camera sensor requires Sensors + Imu world plugins
+The Gazebo default `server.config` loads Physics, UserCommands, and SceneBroadcaster — but NOT `gz-sim-sensors-system` or `gz-sim-imu-system`. Without these in the world SDF, camera topics won't publish and IMU data won't reach the BetaflightPlugin. These are added explicitly in `drone_course.sdf`.
+
+### aeroloop_gazebo CMake needs Qt5 path
+The BetaflightPlugin links against gz-sim8 which transitively depends on gz-gui8 (Qt5). On macOS Homebrew, Qt5 is keg-only, so CMake needs: `cmake .. -DCMAKE_PREFIX_PATH="/opt/homebrew;/opt/homebrew/opt/qt@5"`
+
+### BetaflightPlugin FDM bootstrap (deadlock fix)
+The upstream BetaflightPlugin only sends FDM state after receiving motor commands, but BetaFlight SITL blocks on `recv(9003)` waiting for FDM before sending motors — a deadlock. Our fix (in `BetaflightPlugin.cc`) moves `SendState()` to run unconditionally every sim tick, before `ReceiveMotorCommand()`, so FDM flows immediately and BetaFlight unblocks. If you re-clone or update aeroloop_gazebo, this fix must be reapplied.
+
+### BetaFlight SITL creates eeprom.bin in cwd
+The SITL binary writes `eeprom.bin` (32KB BetaFlight config storage) in whatever directory it's launched from. `start.sh` runs it from the project root, so `eeprom.bin` appears there. It's gitignored. Delete it to reset BetaFlight configuration to defaults.
+
+### Metal rendering crash (gz-sim #2877)
+Gazebo camera sensors can crash with the Metal rendering backend. The world uses `ogre2` render engine explicitly. If crashes occur, try: `export GZ_SIM_RENDER_ENGINE=ogre2`
+
+### Shared memory leak warning on shutdown
+The `resource_tracker` may warn about leaked shared memory on shutdown — this is cosmetic, caused by a race between `stop_all.sh` killing processes and Python's resource tracker cleanup.
+
+### Switching Gazebo worlds
+Two things must be updated in sync:
+1. `GZ_WORLD` env var (or default in `start.sh`)
+2. `DRONE_GZ_CAMERA_TOPIC` in `donkeydrone/drone_config.py` — the topic path includes the world name
+
+## Current Status (2026-03-22)
+
+Full stack integrated and tested: `start.sh` → Gazebo (server + GUI) + BetaFlight SITL + drone_manage.py all launch, BetaflightPlugin loads and bridges UDP 9002/9003, RC packets flow at 50Hz, camera frames arrive via shared memory, Web UI serves at :8887. The `betaloop_drone_cam` model loads in Gazebo with the BetaFlight bridge connected ("Betaflight controller online detected" in Gazebo verbose log).

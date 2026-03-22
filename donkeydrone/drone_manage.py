@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Scripts to fly a drone in PX4 SITL + Gazebo simulator.
+Scripts to fly a drone in BetaFlight SITL + Gazebo simulator.
 
 This is a modified version of manage.py that uses DroneGymEnv instead of
 DonkeyGymEnv. The DonkeyCar pipeline (web controller, CNN model, training,
@@ -48,11 +48,11 @@ logging.basicConfig(level=logging.INFO)
 
 def add_drone_sim(V, cfg):
     """
-    Add the PX4 drone simulator as a DonkeyCar part.
+    Add the BetaFlight drone simulator as a DonkeyCar part.
 
     This replaces add_simulator() from manage.py. It creates a DroneGymEnv
-    that connects to PX4 SITL via MAVSDK and captures camera images via either
-    gz-transport (native macOS) or RTSP (Docker).
+    that connects to BetaFlight SITL via UDP RC packets and captures camera
+    images via either gz-transport (native macOS) or RTSP (Docker).
 
     The memory key names (steering, throttle, cam/image_array) are kept
     identical to the car version so all other parts work unchanged.
@@ -60,22 +60,23 @@ def add_drone_sim(V, cfg):
     from drone_gym import DroneGymEnv, _GZ_CAMERA_TOPIC_DEFAULT
 
     gym = DroneGymEnv(
-        mavsdk_address=cfg.DRONE_MAVSDK_ADDRESS,
+        rc_host=getattr(cfg, 'BETAFLIGHT_RC_HOST', '127.0.0.1'),
+        rc_port=getattr(cfg, 'BETAFLIGHT_RC_PORT', 9004),
         camera_source=getattr(cfg, 'DRONE_CAMERA_SOURCE', 'gz_transport'),
         gz_camera_topic=getattr(cfg, 'DRONE_GZ_CAMERA_TOPIC',
                                 _GZ_CAMERA_TOPIC_DEFAULT),
         rtsp_url=getattr(cfg, 'DRONE_RTSP_URL', 'rtsp://127.0.0.1:8554/live'),
-        max_forward_vel=cfg.DRONE_MAX_FORWARD_VEL,
-        max_yaw_rate=cfg.DRONE_MAX_YAW_RATE,
-        target_altitude=cfg.DRONE_TARGET_ALTITUDE,
-        altitude_change_rate=getattr(cfg, 'DRONE_ALTITUDE_CHANGE_RATE', 1.0),
-        min_altitude=getattr(cfg, 'DRONE_MIN_ALTITUDE', 1.0),
-        max_altitude=getattr(cfg, 'DRONE_MAX_ALTITUDE', 20.0),
+        max_pitch_angle=getattr(cfg, 'DRONE_MAX_PITCH_ANGLE', 25.0),
+        max_yaw_rate=getattr(cfg, 'DRONE_MAX_YAW_RATE', 90.0),
+        hover_throttle=getattr(cfg, 'DRONE_HOVER_THROTTLE', 1500),
+        throttle_range=getattr(cfg, 'DRONE_THROTTLE_RANGE', 300),
+        arm_channel=getattr(cfg, 'BETAFLIGHT_ARM_CHANNEL', 4),
+        mode_channel=getattr(cfg, 'BETAFLIGHT_MODE_CHANNEL', 5),
         image_w=cfg.IMAGE_W,
         image_h=cfg.IMAGE_H,
-        altitude_pid=(cfg.DRONE_ALTITUDE_KP,
-                      cfg.DRONE_ALTITUDE_KI,
-                      cfg.DRONE_ALTITUDE_KD),
+        simulated_delay_ms=getattr(cfg, 'SIMULATED_DELAY_MS', 0),
+        measure_loop_delay=getattr(cfg, 'MEASURE_LOOP_DELAY', False),
+        loop_delay_log_interval=getattr(cfg, 'LOOP_DELAY_LOG_INTERVAL', 100),
         record_position=cfg.DRONE_RECORD_POSITION,
         record_attitude=cfg.DRONE_RECORD_ATTITUDE,
         record_velocity=cfg.DRONE_RECORD_VELOCITY,
@@ -354,7 +355,7 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
         V.add(pub, inputs=['jpg/bin'])
 
     print("=" * 60)
-    print("DRONE MODE")
+    print("DRONE MODE (BetaFlight SITL)")
     print("=" * 60)
     if getattr(cfg, 'USE_DRONE_SIM', False):
         camera_source = getattr(cfg, 'DRONE_CAMERA_SOURCE', 'gz_transport')
@@ -362,11 +363,19 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
             camera_info = f"gz-transport  {getattr(cfg, 'DRONE_GZ_CAMERA_TOPIC', '(default topic)')}"
         else:
             camera_info = f"rtsp  {getattr(cfg, 'DRONE_RTSP_URL', 'rtsp://127.0.0.1:8554/live')}"
-        print(f"  PX4 SITL:  {cfg.DRONE_MAVSDK_ADDRESS}")
+        rc_host = getattr(cfg, 'BETAFLIGHT_RC_HOST', '127.0.0.1')
+        rc_port = getattr(cfg, 'BETAFLIGHT_RC_PORT', 9004)
+        hover = getattr(cfg, 'DRONE_HOVER_THROTTLE', 1500)
+        thr_range = getattr(cfg, 'DRONE_THROTTLE_RANGE', 300)
+        max_pitch = getattr(cfg, 'DRONE_MAX_PITCH_ANGLE', 25.0)
+        delay_ms = getattr(cfg, 'SIMULATED_DELAY_MS', 0)
+        print(f"  RC UDP:    {rc_host}:{rc_port}")
         print(f"  Camera:    {camera_info}")
-        print(f"  Altitude:  {cfg.DRONE_TARGET_ALTITUDE}m (takeoff), range [{getattr(cfg, 'DRONE_MIN_ALTITUDE', 1.0)}-{getattr(cfg, 'DRONE_MAX_ALTITUDE', 20.0)}]m")
-        print(f"  Max speed: {cfg.DRONE_MAX_FORWARD_VEL} m/s")
-        print(f"  Max yaw:   {cfg.DRONE_MAX_YAW_RATE} deg/s")
+        print(f"  Hover PWM: {hover} ± {thr_range}")
+        print(f"  Max pitch: {max_pitch}°")
+        print(f"  Max yaw:   {getattr(cfg, 'DRONE_MAX_YAW_RATE', 90.0)} deg/s")
+        if delay_ms > 0:
+            print(f"  Sim delay: {delay_ms}ms")
     print(f"  Web UI:    http://localhost:{cfg.WEB_CONTROL_PORT}")
     print("=" * 60)
 

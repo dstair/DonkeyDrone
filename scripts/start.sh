@@ -48,7 +48,8 @@ BF_LOG="$LOG_DIR/betaflight.log"
 rm -f "$PROJECT_DIR/eeprom.bin"
 echo "Starting BetaFlight SITL: $BETAFLIGHT_BIN (log: $BF_LOG)..."
 > "$BF_LOG"
-"$BETAFLIGHT_BIN" > "$BF_LOG" 2>&1 &
+# gstdbuf forces line-buffered stdout so [SITL] messages flush to the log immediately
+gstdbuf -oL "$BETAFLIGHT_BIN" > "$BF_LOG" 2>&1 &
 BF_PID=$!
 
 # Give BetaFlight time to initialize

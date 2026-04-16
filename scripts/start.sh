@@ -33,10 +33,13 @@ BETAFLIGHT_BIN="${BETAFLIGHT_SITL_BIN:-$HOME/dev/betaflight/obj/main/betaflight_
 cleanup() {
     echo ""
     echo "Stopping all processes..."
+    # Kill all background children of this script
+    jobs -p | xargs -r kill -9 2>/dev/null
+    # Fall back to pkill for any stragglers
     "$SCRIPT_DIR/stop_all.sh"
     echo "Done."
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
@@ -206,7 +209,8 @@ echo "Gazebo server ready (after ${elapsed}s)."
 if [ "${GZ_HEADLESS:-0}" != "1" ]; then
     GZ_GUI_LOG="$LOG_DIR/gazebo_gui.log"
     gz sim -g >> "$GZ_GUI_LOG" 2>&1 &
-    echo "Gazebo GUI launched."
+    GZ_GUI_PID=$!
+    echo "Gazebo GUI launched (PID $GZ_GUI_PID)."
 fi
 
 # ── Run drone_manage.py in foreground ────────────────────────────

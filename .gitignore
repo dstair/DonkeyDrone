@@ -11,5 +11,9 @@ wheels/
 
 # Logs
 logs/
+
+# State
 models/
 data/
+eeprom.bin
+PLAN-*

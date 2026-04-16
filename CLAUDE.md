@@ -162,8 +162,7 @@ Controlled by `DRONE_CAMERA_SOURCE` in `donkeydrone/drone_config.py`:
 `worlds/drone_course.sdf` includes:
 - Colored wall course (red, yellow, blue, orange) with landmark pillars
 - `<include>` for `betaloop_drone_cam` model (resolved via `GZ_SIM_RESOURCE_PATH`)
-- `Sensors` plugin (ogre2 render engine — required for camera topic to publish)
-- `Imu` plugin (required for IMU sensor data to reach BetaflightPlugin)
+- All 5 required world plugins: `Physics`, `UserCommands`, `SceneBroadcaster`, `Sensors` (ogre2), `Imu`
 
 The `betaloop_drone_cam` model (`~/dev/aeroloop_gazebo/models/betaloop_drone_cam/model.sdf`) contains:
 - Iris quadrotor body (0.4kg) with 4 rotors + LiftDrag aerodynamics
@@ -190,8 +189,8 @@ BetaFlight QUADX `motor_speed[]` index → physical rotor joint:
 ### Stale gz-transport topics
 After killing Gazebo, camera topics can persist in gz-transport's multicast discovery cache for several minutes. The readiness check in `start.sh` matches the specific `betaloop_drone_cam` topic to avoid false positives from stale topics.
 
-### Camera sensor requires Sensors + Imu world plugins
-The Gazebo default `server.config` loads Physics, UserCommands, and SceneBroadcaster — but NOT `gz-sim-sensors-system` or `gz-sim-imu-system`. Without these in the world SDF, camera topics won't publish and IMU data won't reach the BetaflightPlugin. These are added explicitly in `drone_course.sdf`.
+### World-level plugins override server.config defaults
+Adding ANY `<plugin>` to the world SDF causes Gazebo to skip loading `~/.gz/sim/8/server.config` plugins (Physics, UserCommands, SceneBroadcaster). This means `drone_course.sdf` must explicitly include ALL five plugins: Physics, UserCommands, SceneBroadcaster, Sensors, and Imu. Without Physics, nothing moves — no gravity, no forces, no joint actuation.
 
 ### aeroloop_gazebo CMake needs Qt5 path
 The BetaflightPlugin links against gz-sim8 which transitively depends on gz-gui8 (Qt5). On macOS Homebrew, Qt5 is keg-only, so CMake needs: `cmake .. -DCMAKE_PREFIX_PATH="/opt/homebrew;/opt/homebrew/opt/qt@5"`
@@ -213,6 +212,6 @@ Two things must be updated in sync:
 1. `GZ_WORLD` env var (or default in `start.sh`)
 2. `DRONE_GZ_CAMERA_TOPIC` in `donkeydrone/drone_config.py` — the topic path includes the world name
 
-## Current Status (2026-03-22)
+## Current Status (2026-04-16)
 
-Full stack integrated and tested: `start.sh` → Gazebo (server + GUI) + BetaFlight SITL + drone_manage.py all launch, BetaflightPlugin loads and bridges UDP 9002/9003, RC packets flow at 50Hz, camera frames arrive via shared memory, Web UI serves at :8887. The `betaloop_drone_cam` model loads in Gazebo with the BetaFlight bridge connected ("Betaflight controller online detected" in Gazebo verbose log).
+Full stack working end-to-end: `start.sh` → Gazebo + BetaFlight SITL + drone_manage.py all launch, drone physically moves in simulation. Rotors spin at ~300 rad/s at hover throttle, drone hovers at z~0.05m. RC packets flow at 50Hz, camera frames arrive via shared memory, Web UI at :8887. Key fix: `drone_course.sdf` now explicitly includes Physics, UserCommands, and SceneBroadcaster world plugins (adding Sensors/Imu plugins previously overrode server.config defaults, silently removing the Physics engine).

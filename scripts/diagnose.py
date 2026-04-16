@@ -192,20 +192,18 @@ def check_motor_mapping():
     """Print the motor mapping analysis."""
     print("\n--- Motor Mapping Analysis ---")
     print("  BetaFlight SITL pwmCompleteMotorUpdate() remaps motors:")
-    print("    pkt.motor_speed[0] = motorsPwm[1]  (BF Motor 1, Front-Right)")
-    print("    pkt.motor_speed[1] = motorsPwm[2]  (BF Motor 2, Rear-Left)")
-    print("    pkt.motor_speed[2] = motorsPwm[3]  (BF Motor 3, Front-Left)")
-    print("    pkt.motor_speed[3] = motorsPwm[0]  (BF Motor 0, Rear-Right)")
+    print("    pkt.motor_speed[0] = motorsPwm[1]  (BF Motor 1, Front-Right CCW)")
+    print("    pkt.motor_speed[1] = motorsPwm[2]  (BF Motor 2, Rear-Left CCW)")
+    print("    pkt.motor_speed[2] = motorsPwm[3]  (BF Motor 3, Front-Left CW)")
+    print("    pkt.motor_speed[3] = motorsPwm[0]  (BF Motor 0, Rear-Right CW)")
     print()
-    print("  BetaflightPlugin model.sdf maps:")
-    print("    rotor id=0 → rotor_3_joint (Rear-Right CW)   gets pkt[0] = BF Motor 1")
-    print("    rotor id=1 → rotor_0_joint (Front-Right CCW) gets pkt[1] = BF Motor 2")
-    print("    rotor id=2 → rotor_1_joint (Rear-Left CCW)   gets pkt[2] = BF Motor 3")
-    print("    rotor id=3 → rotor_2_joint (Front-Left CW)   gets pkt[3] = BF Motor 0")
+    print("  BetaflightPlugin model.sdf maps (1:1 id→joint):")
+    print("    rotor id=0 → rotor_0_joint (0.13,-0.22)  Front-Right CCW  gets pkt[0] = BF Motor 1 (FR CCW) ✓")
+    print("    rotor id=1 → rotor_1_joint (-0.13,0.20)  Rear-Left CCW   gets pkt[1] = BF Motor 2 (RL CCW) ✓")
+    print("    rotor id=2 → rotor_2_joint (0.13,0.22)   Front-Left CW   gets pkt[2] = BF Motor 3 (FL CW)  ✓")
+    print("    rotor id=3 → rotor_3_joint (-0.13,-0.20) Rear-Right CW   gets pkt[3] = BF Motor 0 (RR CW)  ✓")
     print()
-    print("  Result: EVERY motor goes to the WRONG physical position!")
-    print("  BF thinks it controls Front-Right, but actually moves Rear-Right, etc.")
-    print("  This prevents stable flight — BF stabilization fights itself.")
+    print("  Result: Motor mapping is CORRECT after BF SITL remap.")
 
 
 def main():
@@ -265,12 +263,12 @@ def main():
     print("=" * 60)
     print("""
 1. MOTOR VALUE RANGE: BF SITL sends motor_speed = PWM/1000 = [1.0, 2.0].
-   Plugin expects [0.0, 1.0]. Fix: adjust plugin to subtract 1.0, OR
-   fix BF SITL to send (PWM-1000)/1000.
+   Plugin expects [0.0, 1.0]. FIX APPLIED: BetaflightPlugin.cc now subtracts
+   1.0 from each motor value before scaling by maxRpm.
 
 2. MOTOR INDEX REMAP: BF SITL rotates motor indices in pwmCompleteMotorUpdate.
-   The model.sdf rotor mapping must account for this remapping.
-   Current: every motor goes to the wrong physical rotor.
+   After the remap, indices align correctly with model.sdf rotor positions.
+   Status: CORRECT — no fix needed.
 
 3. FDM FLOW: If BF log shows no "new fdm", the BetaflightPlugin isn't
    sending state to BF, which blocks motor output entirely.

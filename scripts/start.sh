@@ -47,18 +47,29 @@ BF_LOG="$LOG_DIR/betaflight.log"
 # BetaFlight SITL runs best with existing eeprom.bin (deletion causes SIGTRAP on first run)
 
 echo "Starting BetaFlight SITL: $BETAFLIGHT_BIN (log: $BF_LOG)..."
-> "$BF_LOG"
-# Removed gstdbuf to avoid DYLD_INSERT_LIBRARIES SIGTRAP on Apple Silicon
-"$BETAFLIGHT_BIN" > "$BF_LOG" 2>&1 &
-BF_PID=$!
 
-# Give BetaFlight time to initialize
-sleep 2
-if ! kill -0 "$BF_PID" 2>/dev/null; then
-    echo "ERROR: BetaFlight SITL died. Check $BF_LOG"
-    exit 1
-fi
-echo "BetaFlight SITL running (PID $BF_PID)."
+# BetaFlight SITL on macOS ARM64 sometimes crashes on first launch (SIGTRAP), but works on retry
+for attempt in 1 2; do
+    > "$BF_LOG"
+    # Removed gstdbuf to avoid DYLD_INSERT_LIBRARIES SIGTRAP on Apple Silicon
+    "$BETAFLIGHT_BIN" > "$BF_LOG" 2>&1 &
+    BF_PID=$!
+
+    # Give BetaFlight time to initialize
+    sleep 2
+    if kill -0 "$BF_PID" 2>/dev/null; then
+        echo "BetaFlight SITL running (PID $BF_PID)."
+        break
+    else
+        if [ $attempt -eq 1 ]; then
+            echo "BetaFlight crashed on attempt 1, retrying..."
+            sleep 1
+        else
+            echo "ERROR: BetaFlight SITL died on both attempts. Check $BF_LOG"
+            exit 1
+        fi
+    fi
+done
 
 # ── Configure BetaFlight via MSP ─────────────────────────────────
 # Sets ARM on AUX1, ANGLE on AUX2, changes failsafe to AUTO_LANDING if

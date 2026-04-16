@@ -43,13 +43,13 @@ mkdir -p "$LOG_DIR"
 
 # ── Launch BetaFlight SITL (before Gazebo to avoid FDM-during-init crash) ──
 BF_LOG="$LOG_DIR/betaflight.log"
-# Remove stale eeprom.bin — BetaFlight SITL's save corrupts it on macOS ARM64.
-# Modes are configured at runtime via MSP after launch.
-rm -f "$PROJECT_DIR/eeprom.bin"
+
+# BetaFlight SITL runs best with existing eeprom.bin (deletion causes SIGTRAP on first run)
+
 echo "Starting BetaFlight SITL: $BETAFLIGHT_BIN (log: $BF_LOG)..."
 > "$BF_LOG"
-# gstdbuf forces line-buffered stdout so [SITL] messages flush to the log immediately
-gstdbuf -oL "$BETAFLIGHT_BIN" > "$BF_LOG" 2>&1 &
+# Removed gstdbuf to avoid DYLD_INSERT_LIBRARIES SIGTRAP on Apple Silicon
+"$BETAFLIGHT_BIN" > "$BF_LOG" 2>&1 &
 BF_PID=$!
 
 # Give BetaFlight time to initialize

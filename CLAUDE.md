@@ -165,10 +165,12 @@ Controlled by `DRONE_CAMERA_SOURCE` in `donkeydrone/drone_config.py`:
 - All 5 required world plugins: `Physics`, `UserCommands`, `SceneBroadcaster`, `Sensors` (ogre2), `Imu`
 
 The `betaloop_drone_cam` model (`~/dev/aeroloop_gazebo/models/betaloop_drone_cam/model.sdf`) contains:
-- Iris quadrotor body (0.4kg) with 4 rotors + LiftDrag aerodynamics
+- 65mm tiny whoop (0.022kg body, ~0.034kg AUW) with 4 rotors + LiftDrag aerodynamics
+- 31mm (1.2") props, 0802-class motors (vel_cmd_max=2094 rad/s ≈ 20k RPM)
 - Forward-facing camera (640×480, 30Hz, 80° FOV) on `camera_link`
 - IMU sensor on `iris/imu_link` (1000Hz, NED-rotated)
 - BetaflightPlugin with rotor-to-joint mapping (BF QUADX motor order)
+- Visual: scaled Iris mesh (placeholder — replace with whoop mesh later)
 - Camera topic: `/world/drone_course/model/betaloop_drone_cam/link/camera_link/sensor/camera/image`
 
 ### BetaflightPlugin Rotor Mapping
@@ -214,4 +216,6 @@ Two things must be updated in sync:
 
 ## Current Status (2026-04-16)
 
-Full stack working end-to-end: `start.sh` → Gazebo + BetaFlight SITL + drone_manage.py all launch, drone physically moves in simulation. Rotors spin at ~300 rad/s at hover throttle, drone hovers at z~0.05m. RC packets flow at 50Hz, camera frames arrive via shared memory, Web UI at :8887. Key fix: `drone_course.sdf` now explicitly includes Physics, UserCommands, and SceneBroadcaster world plugins (adding Sensors/Imu plugins previously overrode server.config defaults, silently removing the Physics engine).
+Drone model switched from Iris (~510mm, 525g) to 65mm tiny whoop (~34g AUW). Physics, LiftDrag, and BetaflightPlugin parameters all updated in model.sdf. Hover tuned for ~42% throttle. Visual uses scaled Iris mesh as placeholder. Delete eeprom.bin before first launch to reset BetaFlight PIDs for the new lighter airframe. May need PID re-tuning via BetaFlight Configurator if hover is unstable.
+
+Full stack working end-to-end prior to whoop conversion: `start.sh` → Gazebo + BetaFlight SITL + drone_manage.py all launch, RC packets flow at 50Hz, camera frames arrive via shared memory, Web UI at :8887.

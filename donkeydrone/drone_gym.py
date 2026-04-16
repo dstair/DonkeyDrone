@@ -192,6 +192,9 @@ class DroneGymEnv:
             frame_bytes = bytes(self._shm.buf[1:1 + self._frame_size])
             self.frame = np.frombuffer(frame_bytes, dtype=np.uint8).reshape(
                 self.image_h, self.image_w, 3)
+            if self._frame_skip == 0:
+                logger.info("Frame updated (seq=%d, shape=%s, dtype=%s)", seq, self.frame.shape, self.frame.dtype)
+            self._frame_skip = (self._frame_skip + 1) % 30
 
     def _send_rc(self, channels):
         """Send RC channel packet to BetaFlight SITL.

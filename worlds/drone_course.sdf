@@ -13,8 +13,10 @@
 -->
 <sdf version="1.9">
   <world name="drone_course">
-    <physics type="ode">
-      <max_step_size>0.004</max_step_size>
+    <!-- bullet physics: avoids DART/ODE dxHashSpace AABB assertion crash that occurs
+         with 22g whoop (tiny inertia) + IMU plugin + BetaflightPlugin active together. -->
+    <physics name="default_physics" default="true" type="bullet">
+      <max_step_size>0.001</max_step_size>
       <real_time_factor>1.0</real_time_factor>
       <real_time_update_rate>250</real_time_update_rate>
     </physics>
@@ -22,6 +24,21 @@
          explicitly include Physics, UserCommands, and SceneBroadcaster
          alongside Sensors and Imu. Without Physics, nothing moves. -->
     <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics">
+      <engine>
+        <bullet>
+          <solver>
+            <iters>100</iters>
+            <sor>1.0</sor>
+          </solver>
+          <collision>
+            <bullet>
+              <grid_space>
+                <min_size>0.05</min_size>
+              </grid_space>
+            </bullet>
+          </collision>
+        </bullet>
+      </engine>
     </plugin>
     <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands">
     </plugin>
@@ -299,7 +316,7 @@
     <!-- ===== Quadrotor with BetaFlight SITL bridge + camera ===== -->
     <include>
       <uri>model://betaloop_drone_cam</uri>
-      <pose>0 0 0 0 0 0</pose>
+      <pose>0 0 1 0 0 0</pose>
     </include>
 
   </world>

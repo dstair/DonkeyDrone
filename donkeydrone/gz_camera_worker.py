@@ -46,9 +46,15 @@ def main():
     shm = SharedMemory(name=shm_name, create=False)
     logger.info("Attached to shared memory '%s' (%d bytes)", shm_name, shm.size)
 
+    frame_count = [0]
+
     def on_image(msg):
         nonlocal seq
         try:
+            frame_count[0] += 1
+            if frame_count[0] % 30 == 1:
+                logger.info("Receiving frames (count=%d)", frame_count[0])
+
             pixel_format = getattr(msg, 'pixel_format_type', 3)
             if pixel_format == 1:  # L_INT8 grayscale
                 arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
@@ -74,7 +80,7 @@ def main():
             seq = (seq + 1) % 256
             shm.buf[0] = seq
         except Exception as e:
-            logger.debug("Error processing gz image: %s", e)
+            logger.warning("Error processing gz image: %s", e)
 
     node = Node()
     ok = node.subscribe(GzImage, topic, on_image)

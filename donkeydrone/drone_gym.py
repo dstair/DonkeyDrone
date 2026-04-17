@@ -74,6 +74,7 @@ class DroneGymEnv:
                  simulated_delay_ms=0,
                  measure_loop_delay=False,
                  loop_delay_log_interval=100,
+                 input_sensitivity=1.0,
                  record_position=False,
                  record_attitude=False,
                  record_velocity=False):
@@ -94,6 +95,7 @@ class DroneGymEnv:
         self.simulated_delay_ms = simulated_delay_ms
         self.measure_loop_delay = measure_loop_delay
         self.loop_delay_log_interval = loop_delay_log_interval
+        self.input_sensitivity = float(max(0.0, min(1.0, input_sensitivity)))
         self.record_position = record_position
         self.record_attitude = record_attitude
         self.record_velocity = record_velocity
@@ -216,27 +218,33 @@ class DroneGymEnv:
 
         BetaFlight Angle mode channel mapping:
             CH1 (roll):     1500 (centered, no lateral movement)
-            CH2 (pitch):    1500 + throttle * 500 (forward tilt)
-            CH3 (throttle): hover_throttle + altitude * throttle_range (motor power)
-            CH4 (yaw):      1500 + steering * 500 (yaw rate)
+            CH2 (pitch):    1500 + throttle * 500 * sensitivity (forward tilt)
+            CH3 (throttle): unipolar — altitude clamped to [0,1] → [1000, hover+range] PWM
+                            (altitude=0 = motors off, drone rests on ground)
+            CH4 (yaw):      1500 + steering * 500 * sensitivity (yaw rate)
             CH5 (AUX1):     2000 = armed, 1000 = disarmed
             CH6 (AUX2):     2000 = angle mode active
             CH7-16:         1000 (unused)
         """
         channels = [1000] * 16
 
+        # Sensitivity scales pitch/yaw stick deflection.
+        deflection = 500 * self.input_sensitivity
+
         # CH1: roll (centered)
         channels[0] = 1500
 
         # CH2: pitch (forward tilt from throttle input)
-        channels[1] = int(max(1000, min(2000, 1500 + self.throttle * 500)))
+        channels[1] = int(max(1000, min(2000, 1500 + self.throttle * deflection)))
 
-        # CH3: motor throttle (from altitude input)
-        channels[2] = int(max(1000, min(2000,
-                          self.hover_throttle + self.altitude * self.throttle_range)))
+        # CH3: motor throttle — unipolar from altitude input. Negative values
+        # clamp to 0 so the drone sits on the ground at rest.
+        alt = max(0.0, min(1.0, self.altitude))
+        max_throttle_pwm = self.hover_throttle + self.throttle_range
+        channels[2] = int(1000 + alt * (max_throttle_pwm - 1000))
 
         # CH4: yaw (from steering input)
-        channels[3] = int(max(1000, min(2000, 1500 + self.steering * 500)))
+        channels[3] = int(max(1000, min(2000, 1500 + self.steering * deflection)))
 
         # CH5 (AUX1): armed
         channels[self.arm_channel] = 2000

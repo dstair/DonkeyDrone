@@ -43,11 +43,16 @@ BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 
 # ---- Flight Control Mapping (Angle mode) ----
 DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
-DRONE_HOVER_THROTTLE = 1500  # PWM midpoint for hover
-DRONE_THROTTLE_RANGE = 300  # altitude [-1,1] → [1200, 1800] PWM
+DRONE_HOVER_THROTTLE = 1500  # PWM midpoint for hover (reference)
+DRONE_THROTTLE_RANGE = 500  # altitude=1 → hover+range (max throttle PWM)
 
 # Max yaw rate scaling (steering input maps to yaw)
 DRONE_MAX_YAW_RATE = 90.0
+
+# Input sensitivity multiplier [0.0–1.0]: scales stick deflection sent to
+# BetaFlight. 1.0 = full deflection (±500 PWM from center on pitch/yaw);
+# 0.5 = half stick for gentler, easier-to-fly commands.
+DRONE_INPUT_SENSITIVITY = 0.5
 
 # ---- Camera Source ----
 # "gz_transport" - native macOS: Gazebo Harmonic via gz-transport (GPU-accelerated)

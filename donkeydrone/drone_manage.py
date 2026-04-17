@@ -77,6 +77,7 @@ def add_drone_sim(V, cfg):
         simulated_delay_ms=getattr(cfg, 'SIMULATED_DELAY_MS', 0),
         measure_loop_delay=getattr(cfg, 'MEASURE_LOOP_DELAY', False),
         loop_delay_log_interval=getattr(cfg, 'LOOP_DELAY_LOG_INTERVAL', 100),
+        input_sensitivity=getattr(cfg, 'DRONE_INPUT_SENSITIVITY', 1.0),
         record_position=cfg.DRONE_RECORD_POSITION,
         record_attitude=cfg.DRONE_RECORD_ATTITUDE,
         record_velocity=cfg.DRONE_RECORD_VELOCITY,

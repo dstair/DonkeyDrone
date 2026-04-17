@@ -316,7 +316,7 @@
     <!-- ===== Quadrotor with BetaFlight SITL bridge + camera ===== -->
     <include>
       <uri>model://betaloop_drone_cam</uri>
-      <pose>0 0 2 0 0 0</pose>
+      <pose>0 0 0.05 0 0 0</pose>
     </include>
 
   </world>

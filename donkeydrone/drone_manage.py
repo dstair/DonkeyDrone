@@ -17,6 +17,7 @@ Options:
     --myconfig=filename     Specify myconfig file to use.
                             [default: drone_config.py]
 """
+
 import os
 from docopt import docopt
 
@@ -29,14 +30,47 @@ import donkeycar as dk
 from donkeycar.parts.transform import TriggeredCallback, DelayedTrigger
 from donkeycar.parts.tub_v2 import TubWriter
 from donkeycar.parts.datastore import TubHandler
-from donkeycar.parts.controller import LocalWebController, WebFpv, JoystickController
+from donkeycar.parts.controller import (
+    LocalWebController as _LocalWebController,
+    WebFpv,
+    JoystickController,
+)
 from donkeycar.parts.throttle_filter import ThrottleFilter
 from donkeycar.parts.behavior import BehaviorPart
 from donkeycar.parts.file_watcher import FileWatcher
 from donkeycar.parts.launch import AiLaunch
-from donkeycar.parts.kinematics import NormalizeSteeringAngle, UnnormalizeSteeringAngle, TwoWheelSteeringThrottle
-from donkeycar.parts.kinematics import Unicycle, InverseUnicycle, UnicycleUnnormalizeAngularVelocity
-from donkeycar.parts.kinematics import Bicycle, InverseBicycle, BicycleUnnormalizeAngularVelocity
+from donkeycar.parts.kinematics import (
+    NormalizeSteeringAngle,
+    UnnormalizeSteeringAngle,
+    TwoWheelSteeringThrottle,
+)
+from donkeycar.parts.kinematics import (
+    Unicycle,
+    InverseUnicycle,
+    UnicycleUnnormalizeAngularVelocity,
+)
+from donkeycar.parts.kinematics import (
+    Bicycle,
+    InverseBicycle,
+    BicycleUnnormalizeAngularVelocity,
+)
+
+
+class LocalWebController(_LocalWebController):
+    """Override to use local templates from this repo."""
+
+    def __init__(self, *args, **kwargs):
+        import os
+
+        this_dir = os.path.dirname(os.path.realpath(__file__))
+        local_static = os.path.join(this_dir, "templates", "static")
+
+        if os.path.exists(local_static):
+            self.static_file_path = local_static
+
+        super().__init__(*args, **kwargs)
+
+
 from donkeycar.parts.explode import ExplodeDict
 from donkeycar.parts.transform import Lambda
 from donkeycar.parts.pipe import Pipe
@@ -60,44 +94,49 @@ def add_drone_sim(V, cfg):
     from drone_gym import DroneGymEnv, _GZ_CAMERA_TOPIC_DEFAULT
 
     gym = DroneGymEnv(
-        rc_host=getattr(cfg, 'BETAFLIGHT_RC_HOST', '127.0.0.1'),
-        rc_port=getattr(cfg, 'BETAFLIGHT_RC_PORT', 9004),
-        camera_source=getattr(cfg, 'DRONE_CAMERA_SOURCE', 'gz_transport'),
-        gz_camera_topic=getattr(cfg, 'DRONE_GZ_CAMERA_TOPIC',
-                                _GZ_CAMERA_TOPIC_DEFAULT),
-        rtsp_url=getattr(cfg, 'DRONE_RTSP_URL', 'rtsp://127.0.0.1:8554/live'),
-        max_pitch_angle=getattr(cfg, 'DRONE_MAX_PITCH_ANGLE', 25.0),
-        max_yaw_rate=getattr(cfg, 'DRONE_MAX_YAW_RATE', 90.0),
-        hover_throttle=getattr(cfg, 'DRONE_HOVER_THROTTLE', 1500),
-        throttle_range=getattr(cfg, 'DRONE_THROTTLE_RANGE', 300),
-        arm_channel=getattr(cfg, 'BETAFLIGHT_ARM_CHANNEL', 4),
-        mode_channel=getattr(cfg, 'BETAFLIGHT_MODE_CHANNEL', 5),
+        rc_host=getattr(cfg, "BETAFLIGHT_RC_HOST", "127.0.0.1"),
+        rc_port=getattr(cfg, "BETAFLIGHT_RC_PORT", 9004),
+        camera_source=getattr(cfg, "DRONE_CAMERA_SOURCE", "gz_transport"),
+        gz_camera_topic=getattr(cfg, "DRONE_GZ_CAMERA_TOPIC", _GZ_CAMERA_TOPIC_DEFAULT),
+        rtsp_url=getattr(cfg, "DRONE_RTSP_URL", "rtsp://127.0.0.1:8554/live"),
+        max_pitch_angle=getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0),
+        max_yaw_rate=getattr(cfg, "DRONE_MAX_YAW_RATE", 90.0),
+        hover_throttle=getattr(cfg, "DRONE_HOVER_THROTTLE", 1500),
+        throttle_range=getattr(cfg, "DRONE_THROTTLE_RANGE", 300),
+        arm_channel=getattr(cfg, "BETAFLIGHT_ARM_CHANNEL", 4),
+        mode_channel=getattr(cfg, "BETAFLIGHT_MODE_CHANNEL", 5),
         image_w=cfg.IMAGE_W,
         image_h=cfg.IMAGE_H,
-        simulated_delay_ms=getattr(cfg, 'SIMULATED_DELAY_MS', 0),
-        measure_loop_delay=getattr(cfg, 'MEASURE_LOOP_DELAY', False),
-        loop_delay_log_interval=getattr(cfg, 'LOOP_DELAY_LOG_INTERVAL', 100),
-        input_sensitivity=getattr(cfg, 'DRONE_INPUT_SENSITIVITY', 1.0),
+        simulated_delay_ms=getattr(cfg, "SIMULATED_DELAY_MS", 0),
+        measure_loop_delay=getattr(cfg, "MEASURE_LOOP_DELAY", False),
+        loop_delay_log_interval=getattr(cfg, "LOOP_DELAY_LOG_INTERVAL", 100),
+        input_sensitivity=getattr(cfg, "DRONE_INPUT_SENSITIVITY", 1.0),
         record_position=cfg.DRONE_RECORD_POSITION,
         record_attitude=cfg.DRONE_RECORD_ATTITUDE,
         record_velocity=cfg.DRONE_RECORD_VELOCITY,
     )
 
-    inputs = ['steering', 'throttle', 'altitude']
-    outputs = ['cam/image_array']
+    inputs = ["steering", "throttle", "altitude"]
+    outputs = ["cam/image_array"]
 
     if cfg.DRONE_RECORD_POSITION:
-        outputs += ['pos/pos_x', 'pos/pos_y', 'pos/pos_z']
+        outputs += ["pos/pos_x", "pos/pos_y", "pos/pos_z"]
     if cfg.DRONE_RECORD_ATTITUDE:
-        outputs += ['imu/roll', 'imu/pitch', 'imu/yaw']
+        outputs += ["imu/roll", "imu/pitch", "imu/yaw"]
     if cfg.DRONE_RECORD_VELOCITY:
-        outputs += ['vel/vel_x', 'vel/vel_y', 'vel/vel_z']
+        outputs += ["vel/vel_x", "vel/vel_y", "vel/vel_z"]
 
     V.add(gym, inputs=inputs, outputs=outputs, threaded=True)
 
 
-def drive(cfg, model_path=None, use_joystick=False, model_type=None,
-          camera_type='single', meta=[]):
+def drive(
+    cfg,
+    model_path=None,
+    use_joystick=False,
+    model_type=None,
+    camera_type="single",
+    meta=[],
+):
     """
     Construct a working drone vehicle from many parts.
 
@@ -105,7 +144,7 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     replaced by add_drone_sim(). All other parts (web controller, model
     inference, DriveMode, TubWriter) are reused unchanged.
     """
-    logger.info(f'PID: {os.getpid()}')
+    logger.info(f"PID: {os.getpid()}")
 
     if model_type is None:
         if cfg.TRAIN_LOCALIZER:
@@ -128,22 +167,26 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     #
     # Add drone simulator (replaces add_simulator)
     #
-    if getattr(cfg, 'USE_DRONE_SIM', False):
+    if getattr(cfg, "USE_DRONE_SIM", False):
         add_drone_sim(V, cfg)
     else:
         # Fall back to original car simulator if not in drone mode
         from donkeycar.parts.dgym import DonkeyGymEnv
+
         if cfg.DONKEY_GYM:
-            gym = DonkeyGymEnv(cfg.DONKEY_SIM_PATH, host=cfg.SIM_HOST,
-                               env_name=cfg.DONKEY_GYM_ENV_NAME,
-                               conf=cfg.GYM_CONF,
-                               record_location=cfg.SIM_RECORD_LOCATION,
-                               record_gyroaccel=cfg.SIM_RECORD_GYROACCEL,
-                               record_velocity=cfg.SIM_RECORD_VELOCITY,
-                               record_lidar=cfg.SIM_RECORD_LIDAR,
-                               delay=cfg.SIM_ARTIFICIAL_LATENCY)
-            inputs = ['steering', 'throttle']
-            outputs = ['cam/image_array']
+            gym = DonkeyGymEnv(
+                cfg.DONKEY_SIM_PATH,
+                host=cfg.SIM_HOST,
+                env_name=cfg.DONKEY_GYM_ENV_NAME,
+                conf=cfg.GYM_CONF,
+                record_location=cfg.SIM_RECORD_LOCATION,
+                record_gyroaccel=cfg.SIM_RECORD_GYROACCEL,
+                record_velocity=cfg.SIM_RECORD_VELOCITY,
+                record_lidar=cfg.SIM_RECORD_LIDAR,
+                delay=cfg.SIM_ARTIFICIAL_LATENCY,
+            )
+            inputs = ["steering", "throttle"]
+            outputs = ["cam/image_array"]
             V.add(gym, inputs=inputs, outputs=outputs, threaded=True)
 
     #
@@ -153,76 +196,111 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
 
     if cfg.SHOW_FPS:
         from donkeycar.parts.fps import FrequencyLogger
-        V.add(FrequencyLogger(cfg.FPS_DEBUG_INTERVAL),
-              outputs=["fps/current", "fps/fps_list"])
+
+        V.add(
+            FrequencyLogger(cfg.FPS_DEBUG_INTERVAL),
+            outputs=["fps/current", "fps/fps_list"],
+        )
 
     #
     # add the user input controller(s)
     #
-    has_input_controller = hasattr(cfg, "CONTROLLER_TYPE") and cfg.CONTROLLER_TYPE != "mock"
+    has_input_controller = (
+        hasattr(cfg, "CONTROLLER_TYPE") and cfg.CONTROLLER_TYPE != "mock"
+    )
     ctr = add_user_controller(V, cfg, use_joystick)
 
     #
     # convert 'user/steering' to 'user/angle' for backward compatibility
     #
-    V.add(Pipe(), inputs=['user/steering'], outputs=['user/angle'])
+    V.add(Pipe(), inputs=["user/steering"], outputs=["user/angle"])
 
     #
     # explode the buttons input map
     #
-    V.add(ExplodeDict(V.mem, "web/"), inputs=['web/buttons'])
+    V.add(ExplodeDict(V.mem, "web/"), inputs=["web/buttons"])
 
-    V.add(Lambda(lambda v: print(f"web/w1 clicked")), inputs=["web/w1"], run_condition="web/w1")
-    V.add(Lambda(lambda v: print(f"web/w2 clicked")), inputs=["web/w2"], run_condition="web/w2")
-    V.add(Lambda(lambda v: print(f"web/w3 clicked")), inputs=["web/w3"], run_condition="web/w3")
-    V.add(Lambda(lambda v: print(f"web/w4 clicked")), inputs=["web/w4"], run_condition="web/w4")
-    V.add(Lambda(lambda v: print(f"web/w5 clicked")), inputs=["web/w5"], run_condition="web/w5")
+    V.add(
+        Lambda(lambda v: print(f"web/w1 clicked")),
+        inputs=["web/w1"],
+        run_condition="web/w1",
+    )
+    V.add(
+        Lambda(lambda v: print(f"web/w2 clicked")),
+        inputs=["web/w2"],
+        run_condition="web/w2",
+    )
+    V.add(
+        Lambda(lambda v: print(f"web/w3 clicked")),
+        inputs=["web/w3"],
+        run_condition="web/w3",
+    )
+    V.add(
+        Lambda(lambda v: print(f"web/w4 clicked")),
+        inputs=["web/w4"],
+        run_condition="web/w4",
+    )
+    V.add(
+        Lambda(lambda v: print(f"web/w5 clicked")),
+        inputs=["web/w5"],
+        run_condition="web/w5",
+    )
 
     # throttle filter
     th_filter = ThrottleFilter()
-    V.add(th_filter, inputs=['user/throttle'], outputs=['user/throttle'])
+    V.add(th_filter, inputs=["user/throttle"], outputs=["user/throttle"])
 
     #
     # maintain run conditions for user mode and autopilot mode parts
     #
-    V.add(UserPilotCondition(show_pilot_image=getattr(cfg, 'SHOW_PILOT_IMAGE', False)),
-          inputs=['user/mode', "cam/image_array", "cam/image_array_trans"],
-          outputs=['run_user', "run_pilot", "ui/image_array"])
+    V.add(
+        UserPilotCondition(show_pilot_image=getattr(cfg, "SHOW_PILOT_IMAGE", False)),
+        inputs=["user/mode", "cam/image_array", "cam/image_array_trans"],
+        outputs=["run_user", "run_pilot", "ui/image_array"],
+    )
 
     rec_tracker_part = RecordTracker(cfg)
-    V.add(rec_tracker_part, inputs=["tub/num_records"], outputs=['records/alert'])
+    V.add(rec_tracker_part, inputs=["tub/num_records"], outputs=["records/alert"])
 
     if cfg.AUTO_RECORD_ON_THROTTLE:
+
         def show_record_count_status():
             rec_tracker_part.last_num_rec_print = 0
             rec_tracker_part.force_alert = 1
+
         if (cfg.CONTROLLER_TYPE != "pigpio_rc") and (cfg.CONTROLLER_TYPE != "MM1"):
             if isinstance(ctr, JoystickController):
-                ctr.set_button_down_trigger('circle', show_record_count_status)
+                ctr.set_button_down_trigger("circle", show_record_count_status)
         else:
             show_record_count_status()
 
     # IMU (from physical hardware, skip for drone sim since sim provides telemetry)
-    if not getattr(cfg, 'USE_DRONE_SIM', False):
+    if not getattr(cfg, "USE_DRONE_SIM", False):
         add_imu(V, cfg)
 
     # FPV preview
     if cfg.USE_FPV:
-        V.add(WebFpv(), inputs=['cam/image_array'], threaded=True)
+        V.add(WebFpv(), inputs=["cam/image_array"], threaded=True)
 
     #
     # load and configure model for inference
     #
     if model_path:
-        if model_path.endswith('.pth'):
+        if model_path.endswith(".pth"):
             from torch_pilot import TorchPilot
+
             kl = TorchPilot(input_shape=(cfg.IMAGE_DEPTH, cfg.IMAGE_H, cfg.IMAGE_W))
         else:
             kl = dk.utils.get_model_by_type(model_type, cfg)
 
         model_reload_cb = None
-        if '.h5' in model_path or '.trt' in model_path or '.tflite' in \
-            model_path or '.savedmodel' in model_path or '.pth' in model_path:
+        if (
+            ".h5" in model_path
+            or ".trt" in model_path
+            or ".tflite" in model_path
+            or ".savedmodel" in model_path
+            or ".pth" in model_path
+        ):
             load_model(kl, model_path)
 
             def reload_model(filename):
@@ -230,13 +308,13 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
 
             model_reload_cb = reload_model
 
-        elif '.json' in model_path:
+        elif ".json" in model_path:
             load_model_json(kl, model_path)
-            weights_path = model_path.replace('.json', '.weights')
+            weights_path = model_path.replace(".json", ".weights")
             load_weights(kl, weights_path)
 
             def reload_weights(filename):
-                weights_path = filename.replace('.json', '.weights')
+                weights_path = filename.replace(".json", ".weights")
                 load_weights(kl, weights_path)
 
             model_reload_cb = reload_weights
@@ -245,68 +323,101 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
             print("ERR>> Unknown extension type on model file!!")
             return
 
-        V.add(FileWatcher(model_path, verbose=True),
-              outputs=['modelfile/modified'])
-        V.add(FileWatcher(model_path), outputs=['modelfile/dirty'],
-              run_condition="run_pilot")
-        V.add(DelayedTrigger(100), inputs=['modelfile/dirty'],
-              outputs=['modelfile/reload'], run_condition="run_pilot")
-        V.add(TriggeredCallback(model_path, model_reload_cb),
-              inputs=["modelfile/reload"], run_condition="run_pilot")
+        V.add(FileWatcher(model_path, verbose=True), outputs=["modelfile/modified"])
+        V.add(
+            FileWatcher(model_path),
+            outputs=["modelfile/dirty"],
+            run_condition="run_pilot",
+        )
+        V.add(
+            DelayedTrigger(100),
+            inputs=["modelfile/dirty"],
+            outputs=["modelfile/reload"],
+            run_condition="run_pilot",
+        )
+        V.add(
+            TriggeredCallback(model_path, model_reload_cb),
+            inputs=["modelfile/reload"],
+            run_condition="run_pilot",
+        )
 
         # Model inputs
         if cfg.TRAIN_BEHAVIORS:
             bh = BehaviorPart(cfg.BEHAVIOR_LIST)
-            V.add(bh, outputs=['behavior/state', 'behavior/label',
-                               "behavior/one_hot_state_array"])
+            V.add(
+                bh,
+                outputs=[
+                    "behavior/state",
+                    "behavior/label",
+                    "behavior/one_hot_state_array",
+                ],
+            )
             try:
-                ctr.set_button_down_trigger('L1', bh.increment_state)
+                ctr.set_button_down_trigger("L1", bh.increment_state)
             except:
                 pass
-            inputs = ['cam/image_array', "behavior/one_hot_state_array"]
+            inputs = ["cam/image_array", "behavior/one_hot_state_array"]
         else:
-            inputs = ['cam/image_array']
+            inputs = ["cam/image_array"]
 
         # Model outputs
-        outputs = ['pilot/angle', 'pilot/throttle', 'pilot/altitude']
+        outputs = ["pilot/angle", "pilot/throttle", "pilot/altitude"]
 
         if cfg.TRAIN_LOCALIZER:
             outputs.append("pilot/loc")
 
         # Image transformations for inference
-        if hasattr(cfg, 'TRANSFORMATIONS') or hasattr(cfg, 'POST_TRANSFORMATIONS'):
+        if hasattr(cfg, "TRANSFORMATIONS") or hasattr(cfg, "POST_TRANSFORMATIONS"):
             from donkeycar.parts.image_transformations import ImageTransformations
-            logger.info(f"Adding inference transformations")
-            V.add(ImageTransformations(cfg, 'TRANSFORMATIONS',
-                                       'POST_TRANSFORMATIONS'),
-                  inputs=['cam/image_array'], outputs=['cam/image_array_trans'])
-            inputs = ['cam/image_array_trans'] + inputs[1:]
 
-        V.add(kl, inputs=inputs, outputs=outputs, run_condition='run_pilot')
+            logger.info(f"Adding inference transformations")
+            V.add(
+                ImageTransformations(cfg, "TRANSFORMATIONS", "POST_TRANSFORMATIONS"),
+                inputs=["cam/image_array"],
+                outputs=["cam/image_array_trans"],
+            )
+            inputs = ["cam/image_array_trans"] + inputs[1:]
+
+        V.add(kl, inputs=inputs, outputs=outputs, run_condition="run_pilot")
 
     #
     # Decide steering and throttle based on user or autopilot mode
     #
-    V.add(DriveMode(cfg.AI_THROTTLE_MULT),
-          inputs=['user/mode', 'user/angle', 'user/throttle', 'user/altitude',
-                  'pilot/angle', 'pilot/throttle', 'pilot/altitude'],
-          outputs=['steering', 'throttle', 'altitude'])
+    V.add(
+        DriveMode(cfg.AI_THROTTLE_MULT),
+        inputs=[
+            "user/mode",
+            "user/angle",
+            "user/throttle",
+            "user/altitude",
+            "pilot/angle",
+            "pilot/throttle",
+            "pilot/altitude",
+        ],
+        outputs=["steering", "throttle", "altitude"],
+    )
 
     if (cfg.CONTROLLER_TYPE != "pigpio_rc") and (cfg.CONTROLLER_TYPE != "MM1"):
         if isinstance(ctr, JoystickController):
-            aiLauncher = AiLaunch(cfg.AI_LAUNCH_DURATION, cfg.AI_LAUNCH_THROTTLE,
-                                  cfg.AI_LAUNCH_KEEP_ENABLED)
-            V.add(aiLauncher,
-                  inputs=['user/mode', 'pilot/throttle'],
-                  outputs=['pilot/throttle'])
-            ctr.set_button_down_trigger(cfg.AI_LAUNCH_ENABLE_BUTTON,
-                                        aiLauncher.enable_ai_launch)
+            aiLauncher = AiLaunch(
+                cfg.AI_LAUNCH_DURATION,
+                cfg.AI_LAUNCH_THROTTLE,
+                cfg.AI_LAUNCH_KEEP_ENABLED,
+            )
+            V.add(
+                aiLauncher,
+                inputs=["user/mode", "pilot/throttle"],
+                outputs=["pilot/throttle"],
+            )
+            ctr.set_button_down_trigger(
+                cfg.AI_LAUNCH_ENABLE_BUTTON, aiLauncher.enable_ai_launch
+            )
 
     # Recording control
-    recording_control = ToggleRecording(cfg.AUTO_RECORD_ON_THROTTLE,
-                                        cfg.RECORD_DURING_AI)
-    V.add(recording_control, inputs=['user/mode', "recording"],
-          outputs=["recording"])
+    recording_control = ToggleRecording(
+        cfg.AUTO_RECORD_ON_THROTTLE, cfg.RECORD_DURING_AI
+    )
+    V.add(recording_control, inputs=["user/mode", "recording"], outputs=["recording"])
 
     #
     # Drive train (MOCK for drone sim, so this is a no-op)
@@ -316,60 +427,81 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     #
     # Tub data recording
     #
-    inputs = ['cam/image_array', 'user/angle', 'user/throttle', 'user/altitude', 'user/mode']
-    types = ['image_array', 'float', 'float', 'float', 'str']
+    inputs = [
+        "cam/image_array",
+        "user/angle",
+        "user/throttle",
+        "user/altitude",
+        "user/mode",
+    ]
+    types = ["image_array", "float", "float", "float", "str"]
 
     # Add drone telemetry to tub schema
-    if getattr(cfg, 'USE_DRONE_SIM', False):
+    if getattr(cfg, "USE_DRONE_SIM", False):
         if cfg.DRONE_RECORD_POSITION:
-            inputs += ['pos/pos_x', 'pos/pos_y', 'pos/pos_z']
-            types += ['float', 'float', 'float']
+            inputs += ["pos/pos_x", "pos/pos_y", "pos/pos_z"]
+            types += ["float", "float", "float"]
         if cfg.DRONE_RECORD_ATTITUDE:
-            inputs += ['imu/roll', 'imu/pitch', 'imu/yaw']
-            types += ['float', 'float', 'float']
+            inputs += ["imu/roll", "imu/pitch", "imu/yaw"]
+            types += ["float", "float", "float"]
         if cfg.DRONE_RECORD_VELOCITY:
-            inputs += ['vel/vel_x', 'vel/vel_y', 'vel/vel_z']
-            types += ['float', 'float', 'float']
+            inputs += ["vel/vel_x", "vel/vel_y", "vel/vel_z"]
+            types += ["float", "float", "float"]
 
     if cfg.HAVE_IMU or (cfg.CAMERA_TYPE == "D435" and cfg.REALSENSE_D435_IMU):
-        inputs += ['imu/acl_x', 'imu/acl_y', 'imu/acl_z',
-                    'imu/gyr_x', 'imu/gyr_y', 'imu/gyr_z']
-        types += ['float', 'float', 'float',
-                  'float', 'float', 'float']
+        inputs += [
+            "imu/acl_x",
+            "imu/acl_y",
+            "imu/acl_z",
+            "imu/gyr_x",
+            "imu/gyr_y",
+            "imu/gyr_z",
+        ]
+        types += ["float", "float", "float", "float", "float", "float"]
 
     if cfg.RECORD_DURING_AI:
-        inputs += ['pilot/angle', 'pilot/throttle', 'pilot/altitude']
-        types += ['float', 'float', 'float']
+        inputs += ["pilot/angle", "pilot/throttle", "pilot/altitude"]
+        types += ["float", "float", "float"]
 
-    tub_path = TubHandler(path=cfg.DATA_PATH).create_tub_path() if \
-        cfg.AUTO_CREATE_NEW_TUB else cfg.DATA_PATH
-    meta += getattr(cfg, 'METADATA', [])
+    tub_path = (
+        TubHandler(path=cfg.DATA_PATH).create_tub_path()
+        if cfg.AUTO_CREATE_NEW_TUB
+        else cfg.DATA_PATH
+    )
+    meta += getattr(cfg, "METADATA", [])
     tub_writer = TubWriter(tub_path, inputs=inputs, types=types, metadata=meta)
-    V.add(tub_writer, inputs=inputs, outputs=["tub/num_records"],
-          run_condition='recording')
+    V.add(
+        tub_writer,
+        inputs=inputs,
+        outputs=["tub/num_records"],
+        run_condition="recording",
+    )
 
     if cfg.PUB_CAMERA_IMAGES:
         from donkeycar.parts.network import TCPServeValue
         from donkeycar.parts.image import ImgArrToJpg
+
         pub = TCPServeValue("camera")
-        V.add(ImgArrToJpg(), inputs=['cam/image_array'], outputs=['jpg/bin'])
-        V.add(pub, inputs=['jpg/bin'])
+        V.add(ImgArrToJpg(), inputs=["cam/image_array"], outputs=["jpg/bin"])
+        V.add(pub, inputs=["jpg/bin"])
 
     print("=" * 60)
     print("DRONE MODE (BetaFlight SITL)")
     print("=" * 60)
-    if getattr(cfg, 'USE_DRONE_SIM', False):
-        camera_source = getattr(cfg, 'DRONE_CAMERA_SOURCE', 'gz_transport')
-        if camera_source == 'gz_transport':
+    if getattr(cfg, "USE_DRONE_SIM", False):
+        camera_source = getattr(cfg, "DRONE_CAMERA_SOURCE", "gz_transport")
+        if camera_source == "gz_transport":
             camera_info = f"gz-transport  {getattr(cfg, 'DRONE_GZ_CAMERA_TOPIC', '(default topic)')}"
         else:
-            camera_info = f"rtsp  {getattr(cfg, 'DRONE_RTSP_URL', 'rtsp://127.0.0.1:8554/live')}"
-        rc_host = getattr(cfg, 'BETAFLIGHT_RC_HOST', '127.0.0.1')
-        rc_port = getattr(cfg, 'BETAFLIGHT_RC_PORT', 9004)
-        hover = getattr(cfg, 'DRONE_HOVER_THROTTLE', 1500)
-        thr_range = getattr(cfg, 'DRONE_THROTTLE_RANGE', 300)
-        max_pitch = getattr(cfg, 'DRONE_MAX_PITCH_ANGLE', 25.0)
-        delay_ms = getattr(cfg, 'SIMULATED_DELAY_MS', 0)
+            camera_info = (
+                f"rtsp  {getattr(cfg, 'DRONE_RTSP_URL', 'rtsp://127.0.0.1:8554/live')}"
+            )
+        rc_host = getattr(cfg, "BETAFLIGHT_RC_HOST", "127.0.0.1")
+        rc_port = getattr(cfg, "BETAFLIGHT_RC_PORT", 9004)
+        hover = getattr(cfg, "DRONE_HOVER_THROTTLE", 1500)
+        thr_range = getattr(cfg, "DRONE_THROTTLE_RANGE", 300)
+        max_pitch = getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0)
+        delay_ms = getattr(cfg, "SIMULATED_DELAY_MS", 0)
         print(f"  RC UDP:    {rc_host}:{rc_port}")
         print(f"  Camera:    {camera_info}")
         print(f"  Hover PWM: {hover} ± {thr_range}")
@@ -391,10 +523,12 @@ def drive(cfg, model_path=None, use_joystick=False, model_type=None,
     except BaseException as e:
         logger.error("Vehicle loop exited with %s: %s", type(e).__name__, e)
         import traceback
+
         traceback.print_exc()
 
 
 # --- Helper classes reused from manage.py ---
+
 
 class ToggleRecording:
     def __init__(self, auto_record_on_throttle, record_in_autopilot):
@@ -416,7 +550,7 @@ class ToggleRecording:
 
         if self.toggle_latch:
             if self.auto_record_on_throttle:
-                logger.info('auto record on throttle is enabled; ignoring toggle.')
+                logger.info("auto record on throttle is enabled; ignoring toggle.")
             else:
                 recording = not self.last_recording
             self.toggle_latch = False
@@ -425,7 +559,7 @@ class ToggleRecording:
             recording = self.recording_latch
             self.recording_latch = None
 
-        if recording and mode != 'user' and not self.record_in_autopilot:
+        if recording and mode != "user" and not self.record_in_autopilot:
             logging.info("Ignoring recording in auto-pilot mode")
             recording = False
 
@@ -440,18 +574,29 @@ class DriveMode:
     def __init__(self, ai_throttle_mult=1.0):
         self.ai_throttle_mult = ai_throttle_mult
 
-    def run(self, mode,
-            user_steering, user_throttle, user_altitude,
-            pilot_steering, pilot_throttle, pilot_altitude):
-        if mode == 'user':
+    def run(
+        self,
+        mode,
+        user_steering,
+        user_throttle,
+        user_altitude,
+        pilot_steering,
+        pilot_throttle,
+        pilot_altitude,
+    ):
+        if mode == "user":
             return user_steering, user_throttle, user_altitude if user_altitude else 0.0
-        elif mode == 'local_angle':
-            return (pilot_steering if pilot_steering else 0.0,
-                    user_throttle,
-                    user_altitude if user_altitude else 0.0)
-        return (pilot_steering if pilot_steering else 0.0,
-                pilot_throttle * self.ai_throttle_mult if pilot_throttle else 0.0,
-                pilot_altitude if pilot_altitude else 0.0)
+        elif mode == "local_angle":
+            return (
+                pilot_steering if pilot_steering else 0.0,
+                user_throttle,
+                user_altitude if user_altitude else 0.0,
+            )
+        return (
+            pilot_steering if pilot_steering else 0.0,
+            pilot_throttle * self.ai_throttle_mult if pilot_throttle else 0.0,
+            pilot_altitude if pilot_altitude else 0.0,
+        )
 
 
 class UserPilotCondition:
@@ -459,7 +604,7 @@ class UserPilotCondition:
         self.show_pilot_image = show_pilot_image
 
     def run(self, mode, user_image, pilot_image):
-        if mode == 'user':
+        if mode == "user":
             return True, False, user_image
         else:
             return False, True, pilot_image if self.show_pilot_image else user_image
@@ -481,7 +626,11 @@ class RecordTracker:
             if num_records % 10 == 0:
                 print("recorded", num_records, "records")
             if num_records % self.cfg.REC_COUNT_ALERT == 0 or self.force_alert:
-                self.dur_alert = num_records // self.cfg.REC_COUNT_ALERT * self.cfg.REC_COUNT_ALERT_CYC
+                self.dur_alert = (
+                    num_records
+                    // self.cfg.REC_COUNT_ALERT
+                    * self.cfg.REC_COUNT_ALERT_CYC
+                )
                 self.force_alert = 0
 
         if self.dur_alert > 0:
@@ -499,31 +648,32 @@ class RecordTracker:
 
 def load_model(kl, model_path):
     start = time.time()
-    print('loading model', model_path)
+    print("loading model", model_path)
     kl.load(model_path)
-    print('finished loading in %s sec.' % (str(time.time() - start)))
+    print("finished loading in %s sec." % (str(time.time() - start)))
 
 
 def load_weights(kl, weights_path):
     start = time.time()
     try:
-        print('loading model weights', weights_path)
+        print("loading model weights", weights_path)
         kl.model.load_weights(weights_path)
-        print('finished loading in %s sec.' % (str(time.time() - start)))
+        print("finished loading in %s sec." % (str(time.time() - start)))
     except Exception as e:
         print(e)
-        print('ERR>> problems loading weights', weights_path)
+        print("ERR>> problems loading weights", weights_path)
 
 
 def load_model_json(kl, json_fnm):
     start = time.time()
-    print('loading model json', json_fnm)
+    print("loading model json", json_fnm)
     from tensorflow.python import keras
+
     try:
-        with open(json_fnm, 'r') as handle:
+        with open(json_fnm, "r") as handle:
             contents = handle.read()
             kl.model = keras.models.model_from_json(contents)
-        print('finished loading json in %s sec.' % (str(time.time() - start)))
+        print("finished loading json in %s sec." % (str(time.time() - start)))
     except Exception as e:
         print(e)
         print("ERR>> problems loading model json", json_fnm)
@@ -533,23 +683,31 @@ def get_camera(cfg):
     cam = None
     if cfg.CAMERA_TYPE == "PICAM":
         from donkeycar.parts.camera import PiCamera
-        cam = PiCamera(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H,
-                       image_d=cfg.IMAGE_DEPTH,
-                       vflip=cfg.CAMERA_VFLIP, hflip=cfg.CAMERA_HFLIP)
+
+        cam = PiCamera(
+            image_w=cfg.IMAGE_W,
+            image_h=cfg.IMAGE_H,
+            image_d=cfg.IMAGE_DEPTH,
+            vflip=cfg.CAMERA_VFLIP,
+            hflip=cfg.CAMERA_HFLIP,
+        )
     elif cfg.CAMERA_TYPE == "WEBCAM":
         from donkeycar.parts.camera import Webcam
-        cam = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H,
-                     image_d=cfg.IMAGE_DEPTH)
+
+        cam = Webcam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH)
     elif cfg.CAMERA_TYPE == "CVCAM":
         from donkeycar.parts.cv import CvCam
-        cam = CvCam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H,
-                    image_d=cfg.IMAGE_DEPTH)
+
+        cam = CvCam(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH)
     elif cfg.CAMERA_TYPE == "MOCK":
         from donkeycar.parts.camera import MockCamera
-        cam = MockCamera(image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H,
-                         image_d=cfg.IMAGE_DEPTH)
+
+        cam = MockCamera(
+            image_w=cfg.IMAGE_W, image_h=cfg.IMAGE_H, image_d=cfg.IMAGE_DEPTH
+        )
     elif cfg.CAMERA_TYPE == "IMAGE_LIST":
         from donkeycar.parts.camera import ImageListCamera
+
         cam = ImageListCamera(path_mask=cfg.PATH_MASK)
     else:
         raise Exception("Unknown camera type: %s" % cfg.CAMERA_TYPE)
@@ -557,83 +715,113 @@ def get_camera(cfg):
 
 
 def add_camera(V, cfg, camera_type):
-    if getattr(cfg, 'USE_DRONE_SIM', False):
+    if getattr(cfg, "USE_DRONE_SIM", False):
         # In drone sim mode, images come from DroneGymEnv (gz-transport or RTSP).
         # Add a MOCK camera as a fallback (it won't overwrite sim images
         # since DroneGymEnv writes to cam/image_array first).
         return
 
     inputs = []
-    outputs = ['cam/image_array']
+    outputs = ["cam/image_array"]
     threaded = True
     cam = get_camera(cfg)
     if cam:
         V.add(cam, inputs=inputs, outputs=outputs, threaded=threaded)
 
 
-def add_user_controller(V, cfg, use_joystick, input_image='ui/image_array'):
+def add_user_controller(V, cfg, use_joystick, input_image="ui/image_array"):
     ctr = LocalWebController(port=cfg.WEB_CONTROL_PORT, mode=cfg.WEB_INIT_MODE)
-    V.add(ctr,
-          inputs=[input_image, 'tub/num_records', 'user/mode', 'recording'],
-          outputs=['user/steering', 'user/throttle', 'user/altitude',
-                   'user/mode', 'recording', 'web/buttons'],
-          threaded=True)
+    V.add(
+        ctr,
+        inputs=[input_image, "tub/num_records", "user/mode", "recording"],
+        outputs=[
+            "user/steering",
+            "user/throttle",
+            "user/altitude",
+            "user/mode",
+            "recording",
+            "web/buttons",
+        ],
+        threaded=True,
+    )
 
     if use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:
         if cfg.CONTROLLER_TYPE == "pigpio_rc":
             from donkeycar.parts.controller import RCReceiver
+
             ctr = RCReceiver(cfg)
-            V.add(ctr,
-                  inputs=['user/mode', 'recording'],
-                  outputs=['user/steering', 'user/throttle',
-                           'user/mode', 'recording'],
-                  threaded=False)
+            V.add(
+                ctr,
+                inputs=["user/mode", "recording"],
+                outputs=["user/steering", "user/throttle", "user/mode", "recording"],
+                threaded=False,
+            )
         elif cfg.CONTROLLER_TYPE == "custom":
             from my_joystick import MyJoystickController
+
             ctr = MyJoystickController(
                 throttle_dir=cfg.JOYSTICK_THROTTLE_DIR,
                 throttle_scale=cfg.JOYSTICK_MAX_THROTTLE,
                 steering_scale=cfg.JOYSTICK_STEERING_SCALE,
-                auto_record_on_throttle=cfg.AUTO_RECORD_ON_THROTTLE)
+                auto_record_on_throttle=cfg.AUTO_RECORD_ON_THROTTLE,
+            )
             ctr.set_deadzone(cfg.JOYSTICK_DEADZONE)
-            V.add(ctr,
-                  inputs=[input_image, 'user/mode', 'recording'],
-                  outputs=['user/steering', 'user/throttle',
-                           'user/mode', 'recording'],
-                  threaded=True)
+            V.add(
+                ctr,
+                inputs=[input_image, "user/mode", "recording"],
+                outputs=["user/steering", "user/throttle", "user/mode", "recording"],
+                threaded=True,
+            )
         elif cfg.CONTROLLER_TYPE == "mock":
             from donkeycar.parts.controller import MockController
-            ctr = MockController(steering=cfg.MOCK_JOYSTICK_STEERING,
-                                 throttle=cfg.MOCK_JOYSTICK_THROTTLE)
-            V.add(ctr,
-                  inputs=[input_image, 'user/mode', 'recording'],
-                  outputs=['user/steering', 'user/throttle',
-                           'user/mode', 'recording'],
-                  threaded=True)
+
+            ctr = MockController(
+                steering=cfg.MOCK_JOYSTICK_STEERING, throttle=cfg.MOCK_JOYSTICK_THROTTLE
+            )
+            V.add(
+                ctr,
+                inputs=[input_image, "user/mode", "recording"],
+                outputs=["user/steering", "user/throttle", "user/mode", "recording"],
+                threaded=True,
+            )
         else:
             from donkeycar.parts.controller import get_js_controller
+
             ctr = get_js_controller(cfg)
             if cfg.USE_NETWORKED_JS:
                 from donkeycar.parts.controller import JoyStickSub
+
                 netwkJs = JoyStickSub(cfg.NETWORK_JS_SERVER_IP)
                 V.add(netwkJs, threaded=True)
                 ctr.js = netwkJs
-            V.add(ctr,
-                  inputs=[input_image, 'user/mode', 'recording'],
-                  outputs=['user/steering', 'user/throttle',
-                           'user/mode', 'recording'],
-                  threaded=True)
+            V.add(
+                ctr,
+                inputs=[input_image, "user/mode", "recording"],
+                outputs=["user/steering", "user/throttle", "user/mode", "recording"],
+                threaded=True,
+            )
     return ctr
 
 
 def add_imu(V, cfg):
     if cfg.HAVE_IMU:
         from donkeycar.parts.imu import IMU
-        imu = IMU(sensor=cfg.IMU_SENSOR, addr=cfg.IMU_ADDRESS,
-                  dlp_setting=cfg.IMU_DLP_CONFIG)
-        V.add(imu, outputs=['imu/acl_x', 'imu/acl_y', 'imu/acl_z',
-                            'imu/gyr_x', 'imu/gyr_y', 'imu/gyr_z'],
-              threaded=True)
+
+        imu = IMU(
+            sensor=cfg.IMU_SENSOR, addr=cfg.IMU_ADDRESS, dlp_setting=cfg.IMU_DLP_CONFIG
+        )
+        V.add(
+            imu,
+            outputs=[
+                "imu/acl_x",
+                "imu/acl_y",
+                "imu/acl_z",
+                "imu/gyr_x",
+                "imu/gyr_y",
+                "imu/gyr_z",
+            ],
+            threaded=True,
+        )
 
 
 def add_drivetrain(V, cfg):
@@ -642,36 +830,55 @@ def add_drivetrain(V, cfg):
         from donkeycar.parts.actuator import TwoWheelSteeringThrottle
 
         if cfg.DRIVE_TRAIN_TYPE == "PWM_STEERING_THROTTLE":
-            from donkeycar.parts.actuator import PWMSteering, PWMThrottle, PulseController
+            from donkeycar.parts.actuator import (
+                PWMSteering,
+                PWMThrottle,
+                PulseController,
+            )
+
             dt = cfg.PWM_STEERING_THROTTLE
             steering_controller = PulseController(
                 pwm_pin=pins.pwm_pin_by_id(dt["PWM_STEERING_PIN"]),
                 pwm_scale=dt["PWM_STEERING_SCALE"],
-                pwm_inverted=dt["PWM_STEERING_INVERTED"])
-            steering = PWMSteering(controller=steering_controller,
-                                   left_pulse=dt["STEERING_LEFT_PWM"],
-                                   right_pulse=dt["STEERING_RIGHT_PWM"])
+                pwm_inverted=dt["PWM_STEERING_INVERTED"],
+            )
+            steering = PWMSteering(
+                controller=steering_controller,
+                left_pulse=dt["STEERING_LEFT_PWM"],
+                right_pulse=dt["STEERING_RIGHT_PWM"],
+            )
             throttle_controller = PulseController(
                 pwm_pin=pins.pwm_pin_by_id(dt["PWM_THROTTLE_PIN"]),
                 pwm_scale=dt["PWM_THROTTLE_SCALE"],
-                pwm_inverted=dt['PWM_THROTTLE_INVERTED'])
-            throttle = PWMThrottle(controller=throttle_controller,
-                                   max_pulse=dt['THROTTLE_FORWARD_PWM'],
-                                   zero_pulse=dt['THROTTLE_STOPPED_PWM'],
-                                   min_pulse=dt['THROTTLE_REVERSE_PWM'])
-            V.add(steering, inputs=['steering'], threaded=True)
-            V.add(throttle, inputs=['throttle'], threaded=True)
+                pwm_inverted=dt["PWM_THROTTLE_INVERTED"],
+            )
+            throttle = PWMThrottle(
+                controller=throttle_controller,
+                max_pulse=dt["THROTTLE_FORWARD_PWM"],
+                zero_pulse=dt["THROTTLE_STOPPED_PWM"],
+                min_pulse=dt["THROTTLE_REVERSE_PWM"],
+            )
+            V.add(steering, inputs=["steering"], threaded=True)
+            V.add(throttle, inputs=["throttle"], threaded=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = docopt(__doc__)
-    cfg = dk.load_config(config_path=os.path.join(os.path.dirname(__file__), 'config.py'), myconfig=args['--myconfig'])
+    cfg = dk.load_config(
+        config_path=os.path.join(os.path.dirname(__file__), "config.py"),
+        myconfig=args["--myconfig"],
+    )
 
-    if args['drive']:
-        model_type = args['--type']
-        camera_type = args['--camera']
-        drive(cfg, model_path=args['--model'], use_joystick=args['--js'],
-              model_type=model_type, camera_type=camera_type,
-              meta=args['--meta'])
-    elif args['train']:
-        print('Use python train.py instead.\n')
+    if args["drive"]:
+        model_type = args["--type"]
+        camera_type = args["--camera"]
+        drive(
+            cfg,
+            model_path=args["--model"],
+            use_joystick=args["--js"],
+            model_type=model_type,
+            camera_type=camera_type,
+            meta=args["--meta"],
+        )
+    elif args["train"]:
+        print("Use python train.py instead.\n")

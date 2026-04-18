@@ -6,24 +6,41 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ── Arg parsing ───────────────────────────────────────────────────
 # --no-manage: bring up Gazebo + BetaFlight SITL but skip drone_manage.py.
-# Useful for test_thrust.py or any tool that needs the sim running without
-# drone_manage fighting over RC UDP port 9004.
+#   Useful for test_thrust.py or any tool that needs the sim running without
+#   drone_manage fighting over RC UDP port 9004.
+# --airframe=65mm|85mm: which drone model + config + world to load.
+#   Default is 65mm (BetaFPV Air65). Use 85mm for the FlyWoo Flylens profile.
 SKIP_MANAGE=0
+AIRFRAME="65mm"
 MANAGE_ARGS=()
 for arg in "$@"; do
-    if [ "$arg" = "--no-manage" ]; then
-        SKIP_MANAGE=1
-    else
-        MANAGE_ARGS+=("$arg")
-    fi
+    case "$arg" in
+        --no-manage)
+            SKIP_MANAGE=1
+            ;;
+        --airframe=*)
+            AIRFRAME="${arg#--airframe=}"
+            ;;
+        *)
+            MANAGE_ARGS+=("$arg")
+            ;;
+    esac
 done
+
+if [ "$AIRFRAME" != "65mm" ] && [ "$AIRFRAME" != "85mm" ]; then
+    echo "error: --airframe must be 65mm or 85mm (got: $AIRFRAME)" >&2
+    exit 1
+fi
+
+MODEL_NAME="betaloop_drone_cam_${AIRFRAME}"
+DRONE_CONFIG="drone_config_${AIRFRAME}.py"
 
 # ── Gazebo environment ────────────────────────────────────────────
 export PATH="/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH"
 export GZ_IP=127.0.0.1
 
-# World to load (override with GZ_WORLD env var)
-GZ_WORLD="${GZ_WORLD:-drone_course}"
+# World to load — derived from --airframe, override with GZ_WORLD env var.
+GZ_WORLD="${GZ_WORLD:-drone_course_${AIRFRAME}}"
 
 # Resource paths: project worlds + aeroloop_gazebo models (if present)
 AEROLOOP_DIR="${AEROLOOP_GAZEBO_DIR:-$HOME/dev/aeroloop_gazebo}"
@@ -354,7 +371,7 @@ while true; do
          --reptype gz.msgs.GUI --timeout 500 --req "" 2>&1 || true)
     if ! echo "$SVC_OUT" | grep -qi "timed out"; then
         # Also verify camera topic exists
-        if gz topic -l 2>/dev/null | grep -q "betaloop_drone_cam.*camera/image"; then
+        if gz topic -l 2>/dev/null | grep -q "${MODEL_NAME}.*camera/image"; then
             break
         fi
     fi
@@ -382,7 +399,7 @@ if [ "$SKIP_MANAGE" = "1" ]; then
     tail -f /dev/null &
     wait $!
 else
-    echo "Starting drone_manage.py..."
+    echo "Starting drone_manage.py (--myconfig=$DRONE_CONFIG)..."
     uv run --env-file .env python -W ignore::SyntaxWarning \
-        donkeydrone/drone_manage.py drive --myconfig=drone_config.py ${MANAGE_ARGS[@]+"${MANAGE_ARGS[@]}"}
+        donkeydrone/drone_manage.py drive --myconfig="$DRONE_CONFIG" ${MANAGE_ARGS[@]+"${MANAGE_ARGS[@]}"}
 fi

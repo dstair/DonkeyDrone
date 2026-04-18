@@ -3,9 +3,11 @@
 # run donkeydrone/test_thrust.py, then tear down.
 #
 # Usage:
-#     ./scripts/test_thrust.sh
+#     ./scripts/test_thrust.sh [--airframe=65mm|85mm] [test_thrust.py args...]
 #
-# Any extra args are forwarded to test_thrust.py.
+# --airframe is forwarded to start.sh and also exported as GZ_WORLD so
+# test_thrust.py subscribes to the right pose topic. All other args are
+# forwarded to test_thrust.py.
 
 set -euo pipefail
 
@@ -14,13 +16,28 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
+AIRFRAME="65mm"
+TEST_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --airframe=*)
+            AIRFRAME="${arg#--airframe=}"
+            ;;
+        *)
+            TEST_ARGS+=("$arg")
+            ;;
+    esac
+done
+
+export GZ_WORLD="drone_course_${AIRFRAME}"
+
 STACK_LOG="$LOG_DIR/start_no_manage.log"
 > "$STACK_LOG"
 
-echo "Bringing up sim stack (Gazebo + BetaFlight SITL)..."
+echo "Bringing up sim stack (Gazebo + BetaFlight SITL, airframe=$AIRFRAME)..."
 # Run start.sh --no-manage headless in the background so this script keeps
 # control. Its EXIT/INT trap will clean up when we kill it.
-GZ_HEADLESS=1 "$SCRIPT_DIR/start.sh" --no-manage > "$STACK_LOG" 2>&1 &
+GZ_HEADLESS=1 "$SCRIPT_DIR/start.sh" --no-manage "--airframe=$AIRFRAME" > "$STACK_LOG" 2>&1 &
 STACK_PID=$!
 
 cleanup() {
@@ -58,4 +75,4 @@ done
 
 echo "Running test_thrust.py..."
 cd "$PROJECT_DIR"
-uv run --env-file .env python donkeydrone/test_thrust.py "$@"
+uv run --env-file .env python donkeydrone/test_thrust.py ${TEST_ARGS[@]+"${TEST_ARGS[@]}"}

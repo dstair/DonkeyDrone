@@ -15,7 +15,7 @@ Options:
     --js                    Use physical joystick.
     --meta=<key:value>      Key/Value strings describing a piece of meta data about this drive. Option may be used more than once.
     --myconfig=filename     Specify myconfig file to use.
-                            [default: drone_config.py]
+                            [default: drone_config_65mm.py]
 """
 
 import os

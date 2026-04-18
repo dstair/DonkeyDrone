@@ -30,6 +30,7 @@ drone_manage.py must NOT be running — the two would fight over the port.
 
 import argparse
 import logging
+import os
 import socket
 import struct
 import time
@@ -40,7 +41,10 @@ logger = logging.getLogger(__name__)
 RC_HOST = "127.0.0.1"
 RC_PORT = 9004
 
-POSE_TOPIC = "/world/drone_course/dynamic_pose/info"
+# World name defaults to the 65mm airframe; test_thrust.sh exports GZ_WORLD
+# when --airframe is passed. Pose topic must match the loaded world.
+_GZ_WORLD = os.environ.get("GZ_WORLD", "drone_course_65mm")
+POSE_TOPIC = f"/world/{_GZ_WORLD}/dynamic_pose/info"
 
 
 def send_rc(rc_sock, channels):
@@ -342,7 +346,7 @@ def run_hover_sweep(rc_sock, pwm_low=1450, pwm_high=1550, step=5, hold_s=2.0):
         best = min(valid, key=lambda r: abs(r[3]))
         logger.info("--- Hover sweep summary ---")
         logger.info("Best hover candidate: PWM=%d (rate=%+.3f m/s)", best[0], best[3])
-        logger.info("Set DRONE_HOVER_THROTTLE = %d in drone_config.py", best[0])
+        logger.info("Set DRONE_HOVER_THROTTLE = %d in your drone_config_XXmm.py", best[0])
     else:
         logger.info("No valid samples — check pose subscription.")
 

@@ -17,21 +17,23 @@ DonkeyDrone adapts the DonkeyCar pipeline to fly a simulated quadrotor drone usi
 # Install dependencies
 uv sync
 
-# Launch (manual drive)
+# Launch (manual drive, default airframe = 65mm Air65)
 ./scripts/start.sh
+# Launch the 85mm FlyWoo Flylens profile instead
+./scripts/start.sh --airframe=85mm
 
 # Launch (autopilot)
 ./scripts/start.sh --model=models/pilot.pth
 
 # Run without start.sh (BetaFlight SITL + Gazebo must already be running)
-uv run --env-file .env python -W ignore::SyntaxWarning donkeydrone/drone_manage.py drive --myconfig=drone_config.py
+uv run --env-file .env python -W ignore::SyntaxWarning donkeydrone/drone_manage.py drive --myconfig=drone_config_65mm.py
 
 # Bring up the sim stack only (no drone_manage) — useful for tools that talk to
 # BetaFlight's RC port directly, like test_thrust.py
-./scripts/start.sh --no-manage
+./scripts/start.sh --no-manage --airframe=65mm
 
 # One-command thrust/hover test (starts stack, runs test, tears down)
-./scripts/test_thrust.sh
+./scripts/test_thrust.sh --airframe=65mm
 
 # Train CNN
 uv run python donkeydrone/torch_train.py --tubs=data/tub_NN_YY-MM-DD --model=models/pilot.pth
@@ -98,7 +100,7 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 - **gz_camera_worker runs as a subprocess** (not thread) to avoid libprotobuf version conflicts between gz-python and TensorFlow/PyTorch
 - **Shared memory IPC**: parent creates POSIX SharedMemory, worker writes frames with a sequence counter, parent polls counter in `run_threaded()` for zero-copy reads
 - **Direct throttle**: no altitude PID — `altitude [-1,1]` maps to motor power, matching real BetaFlight Angle mode behavior for CNN transferability
-- **Config system** (DonkeyCar pattern): `dk.load_config(config_path='config.py', myconfig='drone_config.py')` — edit `drone_config.py`, never `config.py`
+- **Config system** (DonkeyCar pattern): `dk.load_config(config_path='config.py', myconfig='drone_config_65mm.py')` (or `_85mm`) — edit the airframe-specific file, never `config.py`
 
 ## Key Files
 
@@ -106,17 +108,19 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 |------|---------|
 | `donkeydrone/drone_manage.py` | Main entry point |
 | `donkeydrone/drone_gym.py` | DroneGymEnv: BetaFlight RC UDP + camera bridge |
-| `donkeydrone/drone_config.py` | Drone config overrides (**edit this one**) |
+| `donkeydrone/drone_config_65mm.py` | Air65 (65mm, ~31g AUW) config — default airframe |
+| `donkeydrone/drone_config_85mm.py` | FlyWoo Flylens (85mm, ~125g AUW) config — alternate airframe |
 | `donkeydrone/config.py` | Base DonkeyCar config (**do not modify**) |
 | `donkeydrone/gz_camera_worker.py` | Subprocess: gz-transport camera → shared memory |
 | `donkeydrone/torch_model.py` | CNN architecture (LinearModel, PyTorch) |
 | `donkeydrone/torch_pilot.py` | Inference wrapper for vehicle loop |
 | `donkeydrone/torch_train.py` | Training script |
-| `scripts/start.sh` | One-command launcher (Gazebo + BetaFlight + drone_manage). Accepts `--no-manage` to bring up the sim stack only. |
+| `scripts/start.sh` | One-command launcher. Flags: `--airframe=65mm\|85mm` (default 65mm), `--no-manage` (sim stack only). |
 | `scripts/stop_all.sh` | Force-kill all processes |
-| `scripts/test_thrust.sh` | Wrapper: `start.sh --no-manage` + `test_thrust.py` + teardown |
+| `scripts/test_thrust.sh` | Wrapper: `start.sh --no-manage --airframe=$X` + `test_thrust.py` + teardown |
 | `donkeydrone/test_thrust.py` | Ramps throttle 1000→2000 PWM and reports altitude at each step; used for tuning `motorConstant` and finding hover PWM |
-| `worlds/drone_course.sdf` | Custom Gazebo world with colored walls + drone model |
+| `worlds/drone_course_65mm.sdf` | 65mm Air65 world (includes `betaloop_drone_cam_65mm`) |
+| `worlds/drone_course_85mm.sdf` | 85mm FlyWoo Flylens world (includes `betaloop_drone_cam_85mm`) |
 
 ### External Files (outside this repo)
 
@@ -125,15 +129,15 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 | `~/dev/aeroloop_gazebo/` | BetaFlight-Gazebo bridge plugin repo (gz branch) |
 | `~/dev/aeroloop_gazebo/plugins/BetaflightPlugin.cc` | Bridge plugin source: UDP 9002/9003 between BetaFlight ↔ Gazebo |
 | `~/dev/aeroloop_gazebo/plugins/build/libBetaflightPlugin.dylib` | Compiled plugin loaded by Gazebo at runtime |
-| `~/dev/aeroloop_gazebo/models/betaloop_drone_cam/` | Quadrotor model: iris body + 4 rotors + LiftDrag + IMU + forward camera |
-| `~/dev/aeroloop_gazebo/models/betaloop_drone_cam/model.sdf` | Model definition (BetaflightPlugin config, rotor mapping, camera sensor) |
+| `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_65mm/` | 65mm Air65 quadrotor model (4 rotors + LiftDrag + IMU + forward camera) |
+| `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_85mm/` | 85mm FlyWoo Flylens quadrotor model (heavier frame, larger rotor spacing) |
 | `~/dev/betaflight/` | BetaFlight firmware source (SITL target) |
 | `~/dev/betaflight/obj/main/betaflight_SITL.elf` | Compiled BetaFlight SITL binary |
 | `~/.gz/sim/8/server.config` | Gazebo default server plugins (Physics, UserCommands, SceneBroadcaster) |
 
 ## Camera Modes
 
-Controlled by `DRONE_CAMERA_SOURCE` in `donkeydrone/drone_config.py`:
+Controlled by `DRONE_CAMERA_SOURCE` in your `donkeydrone/drone_config_XXmm.py`:
 - `"gz_transport"` (default): native macOS, Gazebo Harmonic, gz-python bindings
 - `"rtsp"`: Docker legacy mode, Gazebo Classic, OpenCV VideoCapture
 
@@ -143,10 +147,10 @@ Controlled by `DRONE_CAMERA_SOURCE` in `donkeydrone/drone_config.py`:
 - Input: `(B, 3, H, W)` float32 [0,1]. Fully size-agnostic (adapts to IMAGE_W/IMAGE_H)
 - Training uses MPS (Apple Silicon GPU) automatically if available, then CUDA, then CPU
 
-## Important Config Parameters (`donkeydrone/drone_config.py`)
+## Important Config Parameters (`donkeydrone/drone_config_{65,85}mm.py`)
 
-- `DRONE_GZ_CAMERA_TOPIC`: must match world name — update when switching worlds
-- `GZ_WORLD` env var in `scripts/start.sh`: must also be updated when switching worlds (default: `drone_course`)
+- `DRONE_GZ_CAMERA_TOPIC`: must match world + model name — the two configs are preset for their own worlds (`drone_course_65mm` / `drone_course_85mm`)
+- `GZ_WORLD` env var in `scripts/start.sh`: derived from `--airframe` (default `drone_course_65mm`); only override manually if you know what you're doing
 - `BETAFLIGHT_RC_HOST`/`BETAFLIGHT_RC_PORT`: BetaFlight SITL RC endpoint (default 127.0.0.1:9004)
 - `DRONE_HOVER_THROTTLE`: PWM midpoint for hover (default 1500)
 - `DRONE_THROTTLE_RANGE`: altitude [-1,1] maps to ±this around hover (default 300)
@@ -177,12 +181,12 @@ CH3 is **bipolar**: `altitude=0` → hover PWM (drone holds altitude — sim thr
 
 The hover PWM depends on: drone mass, `motorConstant` in `model.sdf`, `maxRpm`, and (secondarily) the LiftDrag plugin tuning on each rotor. At hover, total thrust must equal weight: `4 × motorConstant × ω² = m × g`.
 
-For the current 85mm-style model (total mass ≈ 0.125 kg, `maxRpm=2094`):
+For the current 65mm Air65-style model (total mass ≈ 0.031 kg, `maxRpm=2094`):
 
-- `motorConstant = 2.8e-7` → hover at **PWM ≈ 1500** (50% throttle), TWR ≈ 4× — matches a real 85mm FlyWoo Flylens
-- `motorConstant = 8.0e-7` → hover at PWM ≈ 1290, TWR ≈ 11× — way too hot; tiny stick movements launch the drone
+- `motorConstant = 7.0e-8` → hover at **PWM ≈ 1493** (50% throttle), TWR ≈ 4× — matches a real BetaFPV Air65 (65mm, ~31g AUW)
+- For reference, the prior 85mm FlyWoo Flylens profile was `motorConstant = 2.8e-7` at 125g AUW (also hover ≈ 1495, same TWR)
 
-If the drone launches at a PWM well below 1500, lower `motorConstant`. If it can't lift off at all, raise it. A halving of `motorConstant` roughly shifts the hover PWM up by `~150` (since thrust ∝ ω² and ω scales linearly with PWM).
+If the drone launches at a PWM well below 1500, lower `motorConstant`. If it can't lift off at all, raise it. Since thrust ∝ motorConstant × ω² and ω scales linearly with PWM, motorConstant must scale with mass to preserve hover PWM when you change the airframe.
 
 ### Finding hover PWM: `test_thrust.py`
 
@@ -234,21 +238,30 @@ Risks: oscillation if `k` is too high. Start low and tune up. The Gazebo pose to
 - Gazebo Harmonic: `brew install gz-harmonic` (ARM64 Homebrew only)
 - ARM64 Ruby required for gz CLI wrapper: `/opt/homebrew/opt/ruby/bin/ruby`
 
-## Gazebo World & Drone Model
+## Gazebo Worlds & Drone Models
 
-`worlds/drone_course.sdf` includes:
-- Colored wall course (red, yellow, blue, orange) with landmark pillars
-- `<include>` for `betaloop_drone_cam` model (resolved via `GZ_SIM_RESOURCE_PATH`)
+Two parallel airframes share one course layout but separate world + model files. `--airframe=65mm|85mm` on `start.sh` / `test_thrust.sh` selects between them (default 65mm).
+
+Both `worlds/drone_course_65mm.sdf` and `worlds/drone_course_85mm.sdf` include:
+- Identical colored wall course (red, yellow, blue, orange) with landmark pillars
+- `<include>` for the matching `betaloop_drone_cam_{65,85}mm` model (resolved via `GZ_SIM_RESOURCE_PATH`)
 - All 5 required world plugins: `Physics`, `UserCommands`, `SceneBroadcaster`, `Sensors` (ogre2), `Imu`
 
-The `betaloop_drone_cam` model (`~/dev/aeroloop_gazebo/models/betaloop_drone_cam/model.sdf`) contains:
-- 65mm tiny whoop (0.022kg body, ~0.034kg AUW) with 4 rotors + LiftDrag aerodynamics
-- 31mm (1.2") props, 0802-class motors (vel_cmd_max=2094 rad/s ≈ 20k RPM)
-- Forward-facing camera (640×480, 30Hz, 80° FOV) on `camera_link`
-- IMU sensor on `iris/imu_link` (1000Hz, NED-rotated)
-- BetaflightPlugin with rotor-to-joint mapping (BF QUADX motor order)
-- Visual: scaled Iris mesh (placeholder — replace with whoop mesh later)
-- Camera topic: `/world/drone_course/model/betaloop_drone_cam/link/camera_link/sensor/camera/image`
+The 65mm model (`~/dev/aeroloop_gazebo/models/betaloop_drone_cam_65mm/model.sdf`) — BetaFPV Air65:
+- 0.022kg base_link, ~0.031kg AUW, rotor positions ±0.023m (65mm wheelbase)
+- `motorConstant = 7.0e-8` — hover ≈ PWM 1493, TWR ≈ 4×
+- 31mm (1.2") props, 0802-class motors (vel_cmd_max=2094 rad/s)
+
+The 85mm model (`~/dev/aeroloop_gazebo/models/betaloop_drone_cam_85mm/model.sdf`) — FlyWoo Flylens:
+- 0.088kg base_link, ~0.125kg AUW, rotor positions ±0.030m (85mm wheelbase)
+- `motorConstant = 2.8e-7` — hover ≈ PWM 1497, TWR ≈ 4×
+- Same prop/motor class as 65mm; only mass + spacing differ
+
+Both have forward-facing camera (640×480, 30Hz, 80° FOV), IMU on base_link (1000Hz NED-rotated), BetaflightPlugin with rotor-to-joint mapping (BF QUADX motor order), and scaled Iris mesh as a visual placeholder.
+
+Camera topics:
+- 65mm: `/world/drone_course_65mm/model/betaloop_drone_cam_65mm/link/camera_link/sensor/camera/image`
+- 85mm: `/world/drone_course_85mm/model/betaloop_drone_cam_85mm/link/camera_link/sensor/camera/image`
 
 ### BetaflightPlugin Rotor Mapping
 
@@ -278,10 +291,10 @@ Do **not** re-map `<jointName>` using a "BF motor index → joint" table. That d
 `gz sim` cannot run server + GUI in one process on macOS ([gz-sim#44](https://github.com/gazebosim/gz-sim/issues/44)). `start.sh` launches `gz sim -s` (server) then `gz sim -g` (GUI) separately. Set `GZ_HEADLESS=1` to skip the GUI.
 
 ### Stale gz-transport topics
-After killing Gazebo, camera topics can persist in gz-transport's multicast discovery cache for several minutes. The readiness check in `start.sh` matches the specific `betaloop_drone_cam` topic to avoid false positives from stale topics.
+After killing Gazebo, camera topics can persist in gz-transport's multicast discovery cache for several minutes. The readiness check in `start.sh` matches the specific `betaloop_drone_cam_{65,85}mm` topic (derived from `--airframe`) to avoid false positives from stale topics.
 
 ### World-level plugins override server.config defaults
-Adding ANY `<plugin>` to the world SDF causes Gazebo to skip loading `~/.gz/sim/8/server.config` plugins (Physics, UserCommands, SceneBroadcaster). This means `drone_course.sdf` must explicitly include ALL five plugins: Physics, UserCommands, SceneBroadcaster, Sensors, and Imu. Without Physics, nothing moves — no gravity, no forces, no joint actuation.
+Adding ANY `<plugin>` to the world SDF causes Gazebo to skip loading `~/.gz/sim/8/server.config` plugins (Physics, UserCommands, SceneBroadcaster). This means each `worlds/drone_course_XXmm.sdf` must explicitly include ALL five plugins: Physics, UserCommands, SceneBroadcaster, Sensors, and Imu. Without Physics, nothing moves — no gravity, no forces, no joint actuation.
 
 ### aeroloop_gazebo CMake needs Qt5 path
 The BetaflightPlugin links against gz-sim8 which transitively depends on gz-gui8 (Qt5). On macOS Homebrew, Qt5 is keg-only, so CMake needs: `cmake .. -DCMAKE_PREFIX_PATH="/opt/homebrew;/opt/homebrew/opt/qt@5"`
@@ -298,13 +311,13 @@ Gazebo camera sensors can crash with the Metal rendering backend. The world uses
 ### Shared memory leak warning on shutdown
 The `resource_tracker` may warn about leaked shared memory on shutdown — this is cosmetic, caused by a race between `stop_all.sh` killing processes and Python's resource tracker cleanup.
 
-### Switching Gazebo worlds
-Two things must be updated in sync:
-1. `GZ_WORLD` env var (or default in `start.sh`)
-2. `DRONE_GZ_CAMERA_TOPIC` in `donkeydrone/drone_config.py` — the topic path includes the world name
+### Switching airframes
+Use `--airframe=65mm|85mm` on `start.sh` and `test_thrust.sh` (default 65mm). That selects the world (`drone_course_XXmm`), model (`betaloop_drone_cam_XXmm`), and config (`drone_config_XXmm.py`) together. Each config has its own `DRONE_GZ_CAMERA_TOPIC` already matching its world + model.
 
-## Current Status (2026-04-16)
+## Current Status (2026-04-18)
 
-Drone model switched from Iris (~510mm, 525g) to 65mm tiny whoop (~34g AUW). Physics, LiftDrag, and BetaflightPlugin parameters all updated in model.sdf. Hover tuned for ~42% throttle. Visual uses scaled Iris mesh as placeholder. Delete eeprom.bin before first launch to reset BetaFlight PIDs for the new lighter airframe. May need PID re-tuning via BetaFlight Configurator if hover is unstable.
+Two airframes are maintained in parallel for A/B flight comparison: **65mm BetaFPV Air65** (~31g AUW, default) and **85mm FlyWoo Flylens** (~125g AUW). Each has its own model dir (`betaloop_drone_cam_{65,85}mm`), world SDF (`drone_course_{65,85}mm.sdf`), and config (`drone_config_{65,85}mm.py`). Motor constants are scaled so both hover near PWM 1495 with TWR ≈ 4×. Existing `eeprom.bin` retained across airframes (fresh eeprom path via start.sh is known-broken — see memory).
 
-Full stack working end-to-end prior to whoop conversion: `start.sh` → Gazebo + BetaFlight SITL + drone_manage.py all launch, RC packets flow at 50Hz, camera frames arrive via shared memory, Web UI at :8887.
+Known quirk: on Air65, yaw input causes significantly more climb than on the 85mm (mass is 4× smaller, mixer ω² asymmetry produces the same excess thrust → 4× more acceleration). `DRONE_YAW_PWM_CAP = 30` in both configs is the pending tuning knob.
+
+Full stack working end-to-end: `start.sh` → Gazebo + BetaFlight SITL + drone_manage.py all launch, RC packets flow at 50Hz, camera frames arrive via shared memory, Web UI at :8887.

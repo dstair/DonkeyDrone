@@ -10,7 +10,7 @@ The semantic mapping is (BetaFlight Angle mode):
     throttle [-1, 1]  ->  forward pitch (tilt angle)
     altitude [-1, 1]  ->  motor throttle (direct power, no PID)
 
-Camera sources (set DRONE_CAMERA_SOURCE in drone_config.py):
+Camera sources (set DRONE_CAMERA_SOURCE in your drone_config_XXmm.py):
     "gz_transport"  Native macOS: subscribe to Gazebo Harmonic camera topic
                     via gz-transport subprocess + shared memory.
     "rtsp"          Docker mode: read RTSP stream from Gazebo Classic in container.
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 _GZ_CAMERA_TOPIC_DEFAULT = (
-    "/world/drone_course/model/betaloop_drone_cam"
+    "/world/drone_course_65mm/model/betaloop_drone_cam_65mm"
     "/link/camera_link/sensor/camera/image"
 )
 

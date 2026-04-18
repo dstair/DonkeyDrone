@@ -26,7 +26,7 @@ Camera frames  <--  DroneGymEnv  <--  Gazebo
  (320x240 RGB)      (gz-transport)    (renders scene)
 ```
 
-Camera mode (set `DRONE_CAMERA_SOURCE` in `donkeydrone/drone_config.py`):
+Camera mode (set `DRONE_CAMERA_SOURCE` in your `donkeydrone/drone_config_XXmm.py`):
 - **`gz_transport`** (default) — native macOS: Gazebo Harmonic publishes images
   on a gz-transport topic. GPU-accelerated via Metal/OpenGL. Requires `gz-python`.
 
@@ -147,7 +147,7 @@ Then open http://127.0.0.1:8887
 5. On exit or Ctrl+C, calls `scripts/stop_all.sh` to kill all processes cleanly
 
 **Environment variables** for customization:
-- `GZ_WORLD` — Gazebo world name (default: `drone_course`)
+- `GZ_WORLD` — Gazebo world name (default: `drone_course_65mm`; derived from `--airframe`)
 - `BETAFLIGHT_SITL_BIN` — path to BetaFlight SITL binary (default: `~/dev/betaflight/obj/main/betaflight_SITL.elf`)
 - `AEROLOOP_GAZEBO_DIR` — path to aeroloop_gazebo install (default: `~/dev/aeroloop_gazebo`)
 
@@ -196,7 +196,7 @@ In the Web UI, switch to "local_angle" or "local" mode.
 
 ## Configuration
 
-Edit `donkeydrone/drone_config.py` to adjust parameters:
+Two airframe configs are maintained side-by-side. Pick one with `--airframe=65mm|85mm` on `start.sh` (default `65mm`, the BetaFPV Air65). Edit the matching `donkeydrone/drone_config_XXmm.py` to adjust parameters:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -247,12 +247,14 @@ macOS Host (Apple Silicon, ARM64)
 | `scripts/stop_all.sh`     | Kills all BetaFlight/Gazebo processes |
 | `donkeydrone/drone_manage.py` | Main entry point (replaces `manage.py` for drone use) |
 | `donkeydrone/drone_gym.py`    | DroneGymEnv part: BetaFlight RC UDP + gz-transport camera bridge |
-| `donkeydrone/drone_config.py` | Drone-specific configuration (camera source, flight params, delay settings) |
+| `donkeydrone/drone_config_65mm.py` | BetaFPV Air65 config (default airframe) |
+| `donkeydrone/drone_config_85mm.py` | FlyWoo Flylens 85mm config (alternate airframe) |
 | `donkeydrone/config.py`       | Base DonkeyCar config (shared, not modified) |
 | `donkeydrone/torch_model.py`  | CNN architecture (LinearModel, PyTorch) |
 | `donkeydrone/torch_pilot.py`  | Inference wrapper for vehicle loop |
 | `donkeydrone/torch_train.py`  | Training script |
-| `worlds/drone_course.sdf`    | Custom Gazebo world with colored walls |
+| `worlds/drone_course_65mm.sdf` | 65mm Air65 world (colored walls + Air65 model) |
+| `worlds/drone_course_85mm.sdf` | 85mm Flylens world (same course, 85mm model) |
 
 ## Troubleshooting
 

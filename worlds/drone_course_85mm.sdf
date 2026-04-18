@@ -12,7 +12,7 @@
     Add this project's worlds/ dir to GZ_SIM_RESOURCE_PATH.
 -->
 <sdf version="1.9">
-  <world name="drone_course">
+  <world name="drone_course_85mm">
     <!-- bullet physics: avoids DART/ODE dxHashSpace AABB assertion crash that occurs
          with 22g whoop (tiny inertia) + IMU plugin + BetaflightPlugin active together. -->
     <physics name="default_physics" default="true" type="bullet">
@@ -315,7 +315,7 @@
 
     <!-- ===== Quadrotor with BetaFlight SITL bridge + camera ===== -->
     <include>
-      <uri>model://betaloop_drone_cam</uri>
+      <uri>model://betaloop_drone_cam_85mm</uri>
       <pose>0 0 0.05 0 0 0</pose>
     </include>
 

@@ -2,7 +2,8 @@
 # DRONE CONFIG
 #
 # Configuration overrides for flying a drone in BetaFlight SITL + Gazebo simulator.
-# Use with: python drone_manage.py drive --myconfig=drone_config.py
+# Use with: python drone_manage.py drive --myconfig=drone_config_85mm.py
+#   (FlyWoo Flylens 85mm profile, ~125g AUW, 85mm wheelbase)
 #
 # The drone uses the same DonkeyCar pipeline as a car, with a different
 # semantic mapping (BetaFlight Angle mode):
@@ -71,7 +72,7 @@ DRONE_CAMERA_SOURCE = "gz_transport"
 # Must match the world name in your launch script. Run `gz topic -l | grep camera`
 # to confirm the topic on your setup.
 DRONE_GZ_CAMERA_TOPIC = (
-    "/world/drone_course/model/betaloop_drone_cam/link/camera_link/sensor/camera/image"
+    "/world/drone_course_85mm/model/betaloop_drone_cam_85mm/link/camera_link/sensor/camera/image"
 )
 
 # RTSP camera stream URL (Docker mode only -- used when DRONE_CAMERA_SOURCE = "rtsp")

@@ -43,8 +43,8 @@ BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 
 # ---- Flight Control Mapping (Angle mode) ----
 DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
-DRONE_HOVER_THROTTLE = 1287  # PWM midpoint for hover (reference)
-DRONE_THROTTLE_RANGE = 100  # altitude=1 → hover+range (max throttle PWM)
+DRONE_HOVER_THROTTLE = 1500  # PWM midpoint for hover (reference)
+DRONE_THROTTLE_RANGE = 300  # altitude=1 → hover+range (max throttle PWM)
 DRONE_THROTTLE_STEP_SIZE = 0.025  # keyboard step per key press (0.025 = 25 PWM)
 
 # Max yaw rate scaling (steering input maps to yaw)

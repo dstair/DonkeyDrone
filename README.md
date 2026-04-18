@@ -359,14 +359,14 @@ X Switch drone flying from 2D to 3D. CNN predicts 3 outputs [steering, throttle,
 X Switch from PX4/MAVSDK to BetaFlight SITL for real-world tiny whoop transferability.
 X Build aeroloop_gazebo bridge plugin for ARM64 macOS
 X Create Gazebo drone model compatible with BetaFlight bridge (camera sensor attached)
-- swap out quadcopter type - in my planned build, can't see the rotors.
+X swap out quadcopter type - in my planned build, can't see the rotors.
 - research improvements to CNN, though it already is quite impressive.
   - proposal for VLA model and sending coordinates??
-- add xbox controller support.
+- add/test input controller support.
 
 
-lower priority :
+lower priority:
 - try a different world.
 - Add randomization of worlds (wall locations, colors) for better CNN training
 - Add looping to train CNN on a variety of worlds
-- research other tasks that would be interesting to implement (CNN to scan/build a 3D model of an object, for example; object scanning CNN)
+- research other tasks that would be interesting to implement (CNN to scan/build a 3D model of an object, for example)

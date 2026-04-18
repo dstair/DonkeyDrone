@@ -4,6 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# ── Arg parsing ───────────────────────────────────────────────────
+# --no-manage: bring up Gazebo + BetaFlight SITL but skip drone_manage.py.
+# Useful for test_thrust.py or any tool that needs the sim running without
+# drone_manage fighting over RC UDP port 9004.
+SKIP_MANAGE=0
+MANAGE_ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--no-manage" ]; then
+        SKIP_MANAGE=1
+    else
+        MANAGE_ARGS+=("$arg")
+    fi
+done
+
 # ── Gazebo environment ────────────────────────────────────────────
 export PATH="/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH"
 export GZ_IP=127.0.0.1
@@ -114,16 +128,53 @@ def msp_send(sock, cmd, payload=b''):
         print('  MSP cmd %d: unexpected response (%d bytes): %s' % (cmd, len(resp), resp[:20].hex()))
     return b''
 
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect(('127.0.0.1', 5761))
-s.settimeout(1)
-time.sleep(0.5)
+def connect_msp():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    for _ in range(30):
+        try:
+            sock.connect(('127.0.0.1', 5761))
+            break
+        except (ConnectionRefusedError, OSError):
+            time.sleep(0.3)
+    else:
+        raise RuntimeError('Could not reconnect to BetaFlight MSP after reboot')
+    sock.settimeout(1)
+    time.sleep(0.5)
+    try:
+        sock.recv(4096)
+    except socket.timeout:
+        pass
+    return sock
 
-# Drain any initial banner/data
-try:
-    s.recv(4096)
-except socket.timeout:
-    pass
+s = connect_msp()
+
+# Disable AIRMODE feature if enabled. AIRMODE re-scales the motor mix so
+# yaw/attitude commands retain authority at low throttle — which on our
+# 125g airframe causes the drone to climb on yaw input even at CH3=1000.
+# Feature changes require eeprom save + reboot to take effect.
+FEATURE_AIRMODE = 1 << 22
+feat = msp_send(s, 36)  # MSP_FEATURE_CONFIG
+if len(feat) >= 4:
+    current = struct.unpack('<I', feat[:4])[0]
+    if current & FEATURE_AIRMODE:
+        new_feat = current & ~FEATURE_AIRMODE
+        msp_send(s, 37, struct.pack('<I', new_feat))  # MSP_SET_FEATURE_CONFIG
+        msp_send(s, 250)  # MSP_EEPROM_WRITE
+        print('  Features: 0x%08x -> 0x%08x (AIRMODE disabled), saved to eeprom' % (current, new_feat))
+        # MSP_REBOOT (68) — BF restarts internally, socket dies
+        try:
+            frame = b'\$M<' + bytes([0, 68, 68])
+            s.send(frame)
+        except OSError:
+            pass
+        s.close()
+        time.sleep(1.5)
+        s = connect_msp()
+        print('  Reconnected after reboot')
+    else:
+        print('  Features: 0x%08x (AIRMODE already disabled)' % current)
+else:
+    print('  Features: MSP_FEATURE_CONFIG returned %d bytes — skipping airmode check' % len(feat))
 
 # MSP_SET_MODE_RANGE (35): ARM on AUX1, ANGLE on AUX2
 msp_send(s, 35, struct.pack('BBBBB', 0, 0, 0, 32, 48))  # ARM on AUX1
@@ -213,8 +264,18 @@ if [ "${GZ_HEADLESS:-0}" != "1" ]; then
     echo "Gazebo GUI launched (PID $GZ_GUI_PID)."
 fi
 
-# ── Run drone_manage.py in foreground ────────────────────────────
+# ── Run drone_manage.py in foreground (unless --no-manage) ───────
 cd "$PROJECT_DIR"
-echo "Starting drone_manage.py..."
-uv run --env-file .env python -W ignore::SyntaxWarning \
-    donkeydrone/drone_manage.py drive --myconfig=drone_config.py "$@"
+if [ "$SKIP_MANAGE" = "1" ]; then
+    echo "STACK_READY"  # sentinel for wrapper scripts (e.g. test_thrust.sh)
+    echo "Sim stack up. Press Ctrl+C to stop."
+    # Park the script on `wait` so INT/TERM interrupt promptly and the EXIT
+    # trap fires. `tail -f /dev/null` is a cheap way to get a backgrounded
+    # child to wait on.
+    tail -f /dev/null &
+    wait $!
+else
+    echo "Starting drone_manage.py..."
+    uv run --env-file .env python -W ignore::SyntaxWarning \
+        donkeydrone/drone_manage.py drive --myconfig=drone_config.py ${MANAGE_ARGS[@]+"${MANAGE_ARGS[@]}"}
+fi

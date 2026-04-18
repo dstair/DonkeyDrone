@@ -111,6 +111,7 @@ def add_drone_sim(V, cfg):
         measure_loop_delay=getattr(cfg, "MEASURE_LOOP_DELAY", False),
         loop_delay_log_interval=getattr(cfg, "LOOP_DELAY_LOG_INTERVAL", 100),
         input_sensitivity=getattr(cfg, "DRONE_INPUT_SENSITIVITY", 1.0),
+        yaw_pwm_cap=getattr(cfg, "DRONE_YAW_PWM_CAP", 30),
         record_position=cfg.DRONE_RECORD_POSITION,
         record_attitude=cfg.DRONE_RECORD_ATTITUDE,
         record_velocity=cfg.DRONE_RECORD_VELOCITY,

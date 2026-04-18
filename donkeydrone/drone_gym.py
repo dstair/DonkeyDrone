@@ -75,6 +75,7 @@ class DroneGymEnv:
                  measure_loop_delay=False,
                  loop_delay_log_interval=100,
                  input_sensitivity=1.0,
+                 yaw_pwm_cap=30,
                  record_position=False,
                  record_attitude=False,
                  record_velocity=False):
@@ -96,6 +97,11 @@ class DroneGymEnv:
         self.measure_loop_delay = measure_loop_delay
         self.loop_delay_log_interval = loop_delay_log_interval
         self.input_sensitivity = float(max(0.0, min(1.0, input_sensitivity)))
+        # Max CH4 (yaw) deflection in PWM microseconds from center (1500).
+        # The motor mixer's ω²-asymmetry means yaw input at hover produces net
+        # upward thrust — full ±500 deflection makes the drone rocket up. Cap
+        # yaw small to keep the climb induced by turning manageable.
+        self.yaw_pwm_cap = int(max(0, min(500, yaw_pwm_cap)))
         self.record_position = record_position
         self.record_attitude = record_attitude
         self.record_velocity = record_velocity
@@ -223,7 +229,8 @@ class DroneGymEnv:
                             altitude=0 → hover PWM (drone holds altitude in sim where
                             thrust is deterministic); altitude=+1 → hover+range (climb);
                             altitude=-1 → hover-range (descend).
-            CH4 (yaw):      1500 + steering * 500 * sensitivity (yaw rate)
+            CH4 (yaw):      1500 + steering * yaw_pwm_cap (capped independently
+                            of input_sensitivity to limit yaw-induced climb)
             CH5 (AUX1):     2000 = armed, 1000 = disarmed
             CH6 (AUX2):     2000 = angle mode active
             CH7-16:         1000 (unused)
@@ -244,8 +251,11 @@ class DroneGymEnv:
         channels[2] = int(max(1000, min(2000,
             self.hover_throttle + alt * self.throttle_range)))
 
-        # CH4: yaw (from steering input)
-        channels[3] = int(max(1000, min(2000, 1500 + self.steering * deflection)))
+        # CH4: yaw — capped separately from pitch sensitivity. At hover
+        # throttle, yaw deflection adds net thrust via ω² mixer asymmetry;
+        # a small cap keeps the yaw-induced climb manageable.
+        steer = max(-1.0, min(1.0, self.steering))
+        channels[3] = int(max(1000, min(2000, 1500 + steer * self.yaw_pwm_cap)))
 
         # CH5 (AUX1): armed
         channels[self.arm_channel] = 2000

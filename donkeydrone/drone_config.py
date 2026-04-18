@@ -56,6 +56,11 @@ DRONE_MAX_YAW_RATE = 90.0
 # 0.3 = gentler, easier-to-fly commands.
 DRONE_INPUT_SENSITIVITY = 0.1
 
+# CH4 yaw deflection cap in PWM microseconds from center (1500). Yaw input at
+# hover PWM produces net upward thrust via motor-mixer ω² asymmetry — larger
+# deflections make the drone climb on every turn. Keep this small (20–40).
+DRONE_YAW_PWM_CAP = 30
+
 # ---- Camera Source ----
 # "gz_transport" - native macOS: Gazebo Harmonic via gz-transport (GPU-accelerated)
 #                  Discover topic: gz topic -l | grep camera

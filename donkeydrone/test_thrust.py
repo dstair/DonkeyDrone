@@ -9,6 +9,11 @@ Modes (`--mode`):
              full yaw stick. Watch for altitude climb — that's the
              "yaw shoots drone into sky" bug. With AIRMODE disabled
              in BF, altitude should stay ~0.
+    yaw-airborne
+             Climb to altitude first, then apply yaw at hover throttle,
+             then cut CH3 to 1000 while keeping yaw. Checks the user-
+             reported bug: "after yaw input, drone climbs and won't
+             come down even with throttle at 1000."
     hover    Fine sweep near hover (default 1450-1550, 5 PWM steps,
              2s per step) with altitude rate per PWM. Pick the PWM
              closest to 0 m/s rate as your DRONE_HOVER_THROTTLE.
@@ -180,6 +185,127 @@ def run_yaw_test(rc_sock, throttle_pwm=1000, yaw_pwm=2000, duration_s=3.0):
         logger.info("Yaw-induced altitude bleed: %+.3fm → %s", bleed, verdict)
 
 
+def _sample_alt_over(rc_sock, channels, duration_s, dt=0.25):
+    """Hold `channels` for duration_s, sampling altitude every dt seconds."""
+    samples = []
+    n = int(duration_s / dt)
+    for i in range(n):
+        hold(rc_sock, channels, dt)
+        pos = query_pose()
+        alt = pos[2] if pos else None
+        samples.append(((i + 1) * dt, alt))
+    return samples
+
+
+def _print_samples(label, samples):
+    for t, alt in samples:
+        print(f"  {label} t={t:.2f}s alt={alt:.3f}m" if alt is not None
+              else f"  {label} t={t:.2f}s alt=?")
+
+
+def run_yaw_airborne_test(rc_sock, hover_pwm=1495, climb_pwm=1600,
+                          climb_s=4.0, phase_s=3.0, yaw_pwm=2000):
+    """Reproduce "yaw while airborne → won't descend" bug.
+
+    Phases (arm sequence already done by main):
+      A. Climb to altitude at `climb_pwm` for `climb_s` seconds.
+      B. Baseline descent: CH3=1000, yaw centered, sample altitude for phase_s.
+         Re-climb after so phase C starts from altitude too.
+      C. Yaw at hover: CH3=hover_pwm, yaw=yaw_pwm — does it climb vs. baseline hover?
+      D. Yaw + throttle cut: CH3=1000, yaw=yaw_pwm — does it descend at all?
+
+    The bug manifests as: phase D altitude stays ~flat or keeps climbing,
+    while phase B descends normally.
+    """
+    logger.info("=== Yaw-airborne test (hover=%d climb=%d yaw=%d) ===",
+                hover_pwm, climb_pwm, yaw_pwm)
+
+    # --- Phase A: climb ---
+    logger.info("A: climbing at CH3=%d for %.1fs", climb_pwm, climb_s)
+    a_samples = _sample_alt_over(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+    _print_samples("A-climb", a_samples)
+    alt_after_climb = a_samples[-1][1] if a_samples else None
+    logger.info("A: altitude after climb = %s",
+                f"{alt_after_climb:.3f}m" if alt_after_climb is not None else "?")
+
+    # --- Phase B: baseline descent, no yaw ---
+    logger.info("B: baseline descent, CH3=1000 yaw=centered, %.1fs", phase_s)
+    pos = query_pose()
+    b_start = pos[2] if pos else None
+    b_samples = _sample_alt_over(rc_sock, make_channels(1000, armed=True, yaw_pwm=1500), phase_s)
+    _print_samples("B-cut-no-yaw", b_samples)
+    b_end = b_samples[-1][1] if b_samples else None
+
+    # --- Re-climb so phase C/D start from altitude again ---
+    logger.info("Re-climbing at CH3=%d for %.1fs", climb_pwm, climb_s)
+    hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+    pos = query_pose()
+    alt_after_reclimb = pos[2] if pos else None
+    logger.info("Altitude after re-climb = %s",
+                f"{alt_after_reclimb:.3f}m" if alt_after_reclimb is not None else "?")
+
+    # --- Phase C: yaw at hover throttle ---
+    logger.info("C: yaw at hover, CH3=%d yaw=%d, %.1fs", hover_pwm, yaw_pwm, phase_s)
+    pos = query_pose()
+    c_start = pos[2] if pos else None
+    c_samples = _sample_alt_over(rc_sock, make_channels(hover_pwm, armed=True, yaw_pwm=yaw_pwm), phase_s)
+    _print_samples("C-yaw-hover", c_samples)
+    c_end = c_samples[-1][1] if c_samples else None
+
+    # --- Phase D: throttle cut while keeping yaw ---
+    logger.info("D: throttle cut WITH yaw held, CH3=1000 yaw=%d, %.1fs", yaw_pwm, phase_s)
+    pos = query_pose()
+    d_start = pos[2] if pos else None
+    d_samples = _sample_alt_over(rc_sock, make_channels(1000, armed=True, yaw_pwm=yaw_pwm), phase_s)
+    _print_samples("D-cut-yaw-held", d_samples)
+    d_end = d_samples[-1][1] if d_samples else None
+
+    def delta(s, e):
+        return e - s if s is not None and e is not None else None
+
+    b_d = delta(b_start, b_end)
+    c_d = delta(c_start, c_end)
+    d_d = delta(d_start, d_end)
+
+    logger.info("--- Yaw-airborne summary ---")
+    logger.info("B baseline (cut, no yaw):   start=%s end=%s delta=%s",
+                f"{b_start:.3f}m" if b_start is not None else "?",
+                f"{b_end:.3f}m" if b_end is not None else "?",
+                f"{b_d:+.3f}m" if b_d is not None else "?")
+    logger.info("C yaw at hover:             start=%s end=%s delta=%s",
+                f"{c_start:.3f}m" if c_start is not None else "?",
+                f"{c_end:.3f}m" if c_end is not None else "?",
+                f"{c_d:+.3f}m" if c_d is not None else "?")
+    logger.info("D cut WHILE yaw held:       start=%s end=%s delta=%s",
+                f"{d_start:.3f}m" if d_start is not None else "?",
+                f"{d_end:.3f}m" if d_end is not None else "?",
+                f"{d_d:+.3f}m" if d_d is not None else "?")
+
+    # Phase C is the primary signal: at hover PWM, yaw should NOT add net
+    # thrust. Any significant climb in C means the motor mixer is producing
+    # more-than-hover thrust when yaw is commanded — the "yaw shoots drone
+    # into sky" bug.
+    if c_d is not None:
+        if c_d > 1.0:
+            logger.info("Verdict C (yaw at hover): BUG — climbed %+.2fm at hover+yaw", c_d)
+        elif c_d < -1.0:
+            logger.info("Verdict C (yaw at hover): yaw reduces thrust (%+.2fm)", c_d)
+        else:
+            logger.info("Verdict C (yaw at hover): clean (%+.2fm)", c_d)
+    if b_d is not None and d_d is not None:
+        # Phase D interpretation depends on whether climb came from motors
+        # or just momentum carried over from C. In sim, drag is low so a
+        # drone with upward velocity coasts for a while even at CH3=1000.
+        if d_d > 1.0:
+            logger.info("Verdict D (throttle cut + yaw): still climbing %+.2fm — "
+                        "likely phase-C momentum carry-over, not a new thrust bug",
+                        d_d)
+        elif d_d > b_d * 0.5:
+            logger.info("Verdict D: partial descent (%+.3f vs baseline %+.3f)", d_d, b_d)
+        else:
+            logger.info("Verdict D: descends similarly to baseline")
+
+
 def run_hover_sweep(rc_sock, pwm_low=1450, pwm_high=1550, step=5, hold_s=2.0):
     """Fine-grained sweep near hover. Reports altitude rate (m/s) per PWM so
     you can pick DRONE_HOVER_THROTTLE = the PWM closest to 0 m/s rate.
@@ -259,7 +385,7 @@ def run_thrust_ramp(rc_sock):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=["thrust", "yaw", "hover", "both"], default="both",
+    parser.add_argument("--mode", choices=["thrust", "yaw", "yaw-airborne", "hover", "both"], default="both",
                         help="Which test(s) to run (default: both)")
     parser.add_argument("--hover-low", type=int, default=1450)
     parser.add_argument("--hover-high", type=int, default=1550)
@@ -268,6 +394,12 @@ def main():
                         help="CH3 PWM during yaw test (default 1000 = airmode check; use hover PWM to test motor-mixer asymmetry)")
     parser.add_argument("--yaw-pwm", type=int, default=2000,
                         help="CH4 PWM during yaw test (default 2000 = full right)")
+    parser.add_argument("--airborne-hover", type=int, default=1495,
+                        help="Hover PWM for yaw-airborne test")
+    parser.add_argument("--airborne-climb", type=int, default=1550,
+                        help="Climb PWM for yaw-airborne test (just above hover)")
+    parser.add_argument("--airborne-climb-s", type=float, default=2.0)
+    parser.add_argument("--airborne-phase-s", type=float, default=3.0)
     args = parser.parse_args()
 
     logger.info("Opening RC socket...")
@@ -279,10 +411,25 @@ def main():
     logger.info("Waiting for BetaFlight to come up...")
     time.sleep(2)
 
+    # Pump idle disarm packets for a few seconds before arming. BF can sit
+    # with ARMING_DISABLED_RX_FAILSAFE and ARMING_DISABLED_ANGLE set for
+    # several seconds after (re)boot — until RC packets flow and the attitude
+    # estimator converges from Gazebo IMU. 1s isn't always enough.
+    logger.info("Pumping idle packets for 6s to clear failsafe/attitude...")
+    hold(rc_sock, make_channels(1000, armed=False), 6.0)
+
     arm_sequence(rc_sock)
 
     if args.mode in ("yaw", "both"):
         run_yaw_test(rc_sock, throttle_pwm=args.yaw_throttle, yaw_pwm=args.yaw_pwm)
+
+    if args.mode == "yaw-airborne":
+        run_yaw_airborne_test(rc_sock,
+                              hover_pwm=args.airborne_hover,
+                              climb_pwm=args.airborne_climb,
+                              climb_s=args.airborne_climb_s,
+                              phase_s=args.airborne_phase_s,
+                              yaw_pwm=args.yaw_pwm)
 
     if args.mode == "hover":
         run_hover_sweep(rc_sock, args.hover_low, args.hover_high, args.hover_step)

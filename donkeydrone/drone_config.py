@@ -8,7 +8,8 @@
 # semantic mapping (BetaFlight Angle mode):
 #   steering [-1, 1]  ->  yaw rate
 #   throttle [-1, 1]  ->  forward pitch (tilt angle)
-#   altitude [-1, 1]  ->  motor throttle (direct power)
+#   altitude [-1, 1]  ->  motor throttle (bipolar, 0 = hover PWM,
+#                         ±1 = hover ± DRONE_THROTTLE_RANGE)
 # """
 
 # ---- Camera ----
@@ -43,9 +44,9 @@ BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 
 # ---- Flight Control Mapping (Angle mode) ----
 DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
-DRONE_HOVER_THROTTLE = 1500  # PWM midpoint for hover (reference)
-DRONE_THROTTLE_RANGE = 300  # altitude=1 → hover+range (max throttle PWM)
-DRONE_THROTTLE_STEP_SIZE = 0.025  # keyboard step per key press (0.025 = 25 PWM)
+DRONE_HOVER_THROTTLE = 1497  # PWM that produces hover thrust (altitude=0). Measured via `test_thrust.sh --mode=hover`.
+DRONE_THROTTLE_RANGE = 100  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
+DRONE_THROTTLE_STEP_SIZE = 0.1  # keyboard step per keypress (deflection, snaps back to 0 on release)
 
 # Max yaw rate scaling (steering input maps to yaw)
 DRONE_MAX_YAW_RATE = 90.0

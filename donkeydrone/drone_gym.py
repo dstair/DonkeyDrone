@@ -219,8 +219,10 @@ class DroneGymEnv:
         BetaFlight Angle mode channel mapping:
             CH1 (roll):     1500 (centered, no lateral movement)
             CH2 (pitch):    1500 + throttle * 500 * sensitivity (forward tilt)
-            CH3 (throttle): unipolar — altitude clamped to [0,1] → [1000, hover+range] PWM
-                            (altitude=0 = motors off, drone rests on ground)
+            CH3 (throttle): bipolar — altitude in [-1,1] → hover_throttle ± throttle_range.
+                            altitude=0 → hover PWM (drone holds altitude in sim where
+                            thrust is deterministic); altitude=+1 → hover+range (climb);
+                            altitude=-1 → hover-range (descend).
             CH4 (yaw):      1500 + steering * 500 * sensitivity (yaw rate)
             CH5 (AUX1):     2000 = armed, 1000 = disarmed
             CH6 (AUX2):     2000 = angle mode active
@@ -237,11 +239,10 @@ class DroneGymEnv:
         # CH2: pitch (forward tilt from throttle input)
         channels[1] = int(max(1000, min(2000, 1500 + self.throttle * deflection)))
 
-        # CH3: motor throttle — unipolar from altitude input. Negative values
-        # clamp to 0 so the drone sits on the ground at rest.
-        alt = max(0.0, min(1.0, self.altitude))
-        max_throttle_pwm = self.hover_throttle + self.throttle_range
-        channels[2] = int(1000 + alt * (max_throttle_pwm - 1000))
+        # CH3: motor throttle — bipolar around hover.
+        alt = max(-1.0, min(1.0, self.altitude))
+        channels[2] = int(max(1000, min(2000,
+            self.hover_throttle + alt * self.throttle_range)))
 
         # CH4: yaw (from steering input)
         channels[3] = int(max(1000, min(2000, 1500 + self.steering * deflection)))

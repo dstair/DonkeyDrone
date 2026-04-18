@@ -166,12 +166,12 @@ BetaFlight SITL is fed 16-channel RC packets over UDP 9004 at 50Hz. Each channel
 |---------|---------------------|-----------------|
 | CH1 | Roll  | held at 1500 (no lateral input in the current mapping) |
 | CH2 | Pitch | `1500 + throttle × 500 × DRONE_INPUT_SENSITIVITY` — forward tilt |
-| CH3 | **Motor throttle** | unipolar from `altitude [0,1]` → `[1000, HOVER_THROTTLE + THROTTLE_RANGE]` |
+| CH3 | **Motor throttle** | bipolar around hover: `clamp(HOVER_THROTTLE + altitude × THROTTLE_RANGE, 1000, 2000)` |
 | CH4 | Yaw   | `1500 + steering × 500 × DRONE_INPUT_SENSITIVITY` |
 | CH5 (AUX1) | Arm | 2000 armed, 1000 disarmed |
 | CH6 (AUX2) | Angle mode | 2000 active |
 
-CH3 is unipolar (not `hover ± range`) so `altitude=0` cuts the motors and the drone rests on the ground. This differs from older notes that describe bipolar altitude — see `drone_gym.py:_map_controls_to_rc`.
+CH3 is **bipolar**: `altitude=0` → hover PWM (drone holds altitude — sim thrust is deterministic), `altitude=+1` → `HOVER_THROTTLE + THROTTLE_RANGE` (climb), `altitude=-1` → `HOVER_THROTTLE - THROTTLE_RANGE` (descend). Arrow-key UI increments by `DRONE_THROTTLE_STEP_SIZE` per keydown and snaps altitude to 0 on keyup, giving an analog-stick feel. See `drone_gym.py:_map_controls_to_rc`.
 
 ### Hover PWM and the thrust-to-weight envelope
 
@@ -200,13 +200,29 @@ BetaFlight's SITL boot state includes an "arm switch was high at boot" safety fl
 
 ### `DRONE_HOVER_THROTTLE` vs. `DRONE_THROTTLE_RANGE`
 
-`DRONE_HOVER_THROTTLE` is just the PWM reference point used to compute the *top* of the CH3 range — `CH3_max = HOVER_THROTTLE + THROTTLE_RANGE`. The *bottom* is always 1000. With the defaults (`HOVER_THROTTLE=1500`, `THROTTLE_RANGE=300`), the slider maps:
+`DRONE_HOVER_THROTTLE` is the PWM that produces hover thrust (altitude=0). `DRONE_THROTTLE_RANGE` is the symmetric deflection around it. The result is clamped to `[1000, 2000]`. With defaults (`HOVER_THROTTLE=1500`, `THROTTLE_RANGE=300`):
 
-- `altitude = 0.0` → PWM 1000 (motors off, rests on ground)
-- `altitude = 0.5` → PWM 900 below top, around hover
-- `altitude = 1.0` → PWM 1800 (aggressive climb)
+- `altitude = -1.0` → PWM 1200 (descend)
+- `altitude =  0.0` → PWM 1500 (hover)
+- `altitude = +1.0` → PWM 1800 (climb)
 
-If you change the real hover PWM (e.g. by editing `motorConstant`), update `DRONE_HOVER_THROTTLE` so the slider's midpoint still corresponds to hover — otherwise the CNN will learn a skewed altitude distribution.
+The drone takes off on arm because CH3 starts at hover PWM as soon as the arm sequence (which holds CH3=1000 for 2s) completes. To land, hold Down to bring altitude toward -1. If you change the real hover PWM (e.g. by editing `motorConstant`), update `DRONE_HOVER_THROTTLE` so `altitude=0` still corresponds to hover — otherwise the CNN will learn a skewed altitude distribution.
+
+### Planned: vertical-velocity damper (not yet implemented)
+
+Problem: "hover PWM" means thrust = weight → zero *acceleration*. It does not zero existing vertical *velocity*. In sim (minimal air drag) a drone that was climbing and has its stick released keeps coasting upward. Users expect "release = stop in mid-air," which needs an active damper.
+
+Design — proportional altitude-hold in `drone_gym.py`:
+1. Subscribe to `/world/drone_course/dynamic_pose/info` (Pose_V) in a gz-transport thread; keep latest position and compute vz by differencing consecutive poses (or subscribe to a velocity topic if one exists). `test_thrust.py` already has the subscribe-once-keep-latest pattern — lift it into `drone_gym.py` as `_PoseTracker`.
+2. In `_map_controls_to_rc`, when `abs(altitude) < hold_deadband` (e.g. 0.05), bias CH3 by `-k × vz`. `k` in PWM-per-(m/s) — start with `k = 30` (i.e. a 1 m/s climb gets countered by -30 PWM, roughly -1.4 m/s² in current physics).
+3. When the user gives altitude input (stick out of deadband), bypass the damper so the climb command dominates.
+4. Add config knobs: `DRONE_ALTITUDE_HOLD_K = 30`, `DRONE_ALTITUDE_HOLD_DEADBAND = 0.05`, `DRONE_ALTITUDE_HOLD_ENABLED = True`.
+
+Why proportional only: we specifically *don't* want integral because it would fight the user's altitude commands. We also don't want target-altitude-based hold (too complex, requires latching a target when stick releases).
+
+Validation: add `--mode=damper` to `test_thrust.py`. Steps: (a) fly to ~2m with CH3=1600 for 2s, (b) cut to CH3=hover, sample altitude for 5s at 0.25s, (c) assert `|vz| < 0.1 m/s` within 1s and altitude doesn't drift more than 0.5m over the following 4s.
+
+Risks: oscillation if `k` is too high. Start low and tune up. The Gazebo pose topic is ~30Hz so the damper loop won't be tight — expect smooth but not snappy settling.
 
 ## External Dependencies (not in pyproject.toml)
 

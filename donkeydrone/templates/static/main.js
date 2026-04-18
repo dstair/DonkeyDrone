@@ -138,6 +138,11 @@ var driveHandler = new function() {
           if(e.which == 77) { toggleDriveMode() } // 'm' toggle drive mode (_M_ode)
       });
 
+      // Release arrow keys → altitude recenters to 0 (= hover PWM). Analog-stick feel.
+      $(document).keyup(function(e) {
+          if(e.which == 38 || e.which == 40) { altitudeCenter(); e.preventDefault() }
+      });
+
       $('#mode_select').on('change', function () {
         updateDriveMode($(this).val());
       });
@@ -497,13 +502,20 @@ var driveHandler = new function() {
       postDrive()
     };
 
+    // Altitude is bipolar [-1, 1] where 0 = hover. Larger increments give
+    // responsive stick feel; release (keyup) snaps back to 0.
     var altitudeUp = function(){
-      state.tele.user.altitude = Math.min(state.tele.user.altitude + .025, 1)
+      state.tele.user.altitude = Math.min(state.tele.user.altitude + .1, 1)
       postDrive()
     };
 
     var altitudeDown = function(){
-      state.tele.user.altitude = Math.max(state.tele.user.altitude - .025, -1)
+      state.tele.user.altitude = Math.max(state.tele.user.altitude - .1, -1)
+      postDrive()
+    };
+
+    var altitudeCenter = function(){
+      state.tele.user.altitude = 0
       postDrive()
     };
 

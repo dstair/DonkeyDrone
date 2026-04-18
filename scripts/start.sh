@@ -176,6 +176,48 @@ if len(feat) >= 4:
 else:
     print('  Features: MSP_FEATURE_CONFIG returned %d bytes — skipping airmode check' % len(feat))
 
+# Set mixer_type = LINEAR via CLI. LEGACY (the default) clips motors at PWM
+# limits when yaw PID saturates — two motors slam to 2000, two to 1000, and
+# total thrust doubles → drone rockets up on any yaw input. LINEAR scales
+# throttle down instead of clipping, preserving motor headroom.
+def cli_drain(sock, timeout=0.5, match=None):
+    # Read from sock until timeout; stop early if match bytes appear.
+    sock.settimeout(timeout)
+    buf = b''
+    try:
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+            if match is not None and match in buf:
+                break
+    except socket.timeout:
+        pass
+    sock.settimeout(1)
+    return buf
+
+# Entering CLI: BF's serial parser accepts '#' to switch from MSP to CLI mode
+s.sendall(b'#\r\n')
+banner = cli_drain(s, timeout=0.8, match=b'# ')
+# Query current mixer_type
+s.sendall(b'get mixer_type\r\n')
+resp = cli_drain(s, timeout=0.5, match=b'# ')
+if b'LINEAR' in resp:
+    print('  mixer_type: already LINEAR')
+    s.sendall(b'exit\r\n')
+    cli_drain(s, timeout=0.3)
+else:
+    s.sendall(b'set mixer_type = LINEAR\r\n')
+    cli_drain(s, timeout=0.5, match=b'# ')
+    s.sendall(b'save\r\n')
+    # save commits eeprom and reboots — socket dies
+    cli_drain(s, timeout=0.5)
+    s.close()
+    time.sleep(1.8)
+    s = connect_msp()
+    print('  mixer_type: set to LINEAR, saved (reboot)')
+
 # MSP_SET_MODE_RANGE (35): ARM on AUX1, ANGLE on AUX2
 msp_send(s, 35, struct.pack('BBBBB', 0, 0, 0, 32, 48))  # ARM on AUX1
 msp_send(s, 35, struct.pack('BBBBB', 1, 1, 1, 32, 48))  # ANGLE on AUX2

@@ -38,6 +38,69 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+_pose_node = None
+
+
+def _init_pose_subscriber():
+    """Subscribe to pose topic for vertical velocity tracking. Called once."""
+    global _pose_node
+    if _pose_node is not None:
+        return True
+    try:
+        from gz.transport13 import Node
+        from gz.msgs10.pose_v_pb2 import Pose_V
+    except Exception as e:
+        logger.warning("gz-transport not available: %s", e)
+        return False
+
+    node = Node()
+
+    def on_pose(msg):
+        for p in msg.pose:
+            if "betaloop" in p.name.lower():
+                _pose_node.latest = (p.position.x, p.position.y, p.position.z)
+                return
+
+    world = os.environ.get("GZ_WORLD", "drone_course_65mm")
+    topic = f"/world/{world}/dynamic_pose/info"
+    if not node.subscribe(Pose_V, topic, on_pose):
+        logger.warning("Could not subscribe to %s", topic)
+        return False
+
+    _pose_node = node
+    _pose_node.latest = (0.0, 0.0, 0.0)
+    return True
+
+
+class _PoseTracker:
+    """Tracks drone pose and computes vertical velocity from pose topic."""
+
+    def __init__(self, k_pwm=30.0, deadband=0.05, enabled=True):
+        self.k_pwm = k_pwm
+        self.deadband = deadband
+        self.enabled = enabled
+        self.latest = (0.0, 0.0, 0.0)
+        self._prev = None
+        self._prev_time = None
+
+    def update(self):
+        """Call each frame to update position from subscribed topic."""
+        if not self.enabled or _pose_node is None:
+            return
+        self.latest = _pose_node.latest
+        now = time.time()
+        if self._prev is not None and self._prev_time is not None:
+            dt = now - self._prev_time
+            if dt > 0:
+                vz = (self.latest[2] - self._prev[2]) / dt
+                self.vz = vz
+        self._prev = self.latest
+        self._prev_time = now
+
+    def get_vz(self):
+        """Return vertical velocity in m/s."""
+        return getattr(self, "vz", 0.0)
+
 
 _GZ_CAMERA_TOPIC_DEFAULT = (
     "/world/drone_course_65mm/model/betaloop_drone_cam_65mm"
@@ -63,23 +126,34 @@ class DroneGymEnv:
               outputs=['cam/image_array', ...], threaded=True)
     """
 
-    def __init__(self, rc_host="127.0.0.1", rc_port=9004,
-                 camera_source="gz_transport",
-                 gz_camera_topic=_GZ_CAMERA_TOPIC_DEFAULT,
-                 rtsp_url="rtsp://127.0.0.1:8554/live",
-                 max_pitch_angle=25.0, max_yaw_rate=90.0,
-                 hover_throttle=1500, throttle_range=300,
-                 arm_channel=4, mode_channel=5,
-                 image_w=160, image_h=120,
-                 simulated_delay_ms=0,
-                 measure_loop_delay=False,
-                 loop_delay_log_interval=100,
-                 input_sensitivity=1.0,
-                 yaw_pwm_cap=30,
-                 record_position=False,
-                 record_attitude=False,
-                 record_velocity=False):
-
+    def __init__(
+        self,
+        rc_host="127.0.0.1",
+        rc_port=9004,
+        camera_source="gz_transport",
+        gz_camera_topic=_GZ_CAMERA_TOPIC_DEFAULT,
+        rtsp_url="rtsp://127.0.0.1:8554/live",
+        max_pitch_angle=25.0,
+        max_yaw_rate=90.0,
+        hover_throttle=1500,
+        throttle_range=300,
+        throttle_scale=1.0,
+        arm_channel=4,
+        mode_channel=5,
+        image_w=160,
+        image_h=120,
+        simulated_delay_ms=0,
+        measure_loop_delay=False,
+        loop_delay_log_interval=100,
+        input_sensitivity=1.0,
+        yaw_pwm_cap=30,
+        altitude_hold_k=30.0,
+        altitude_hold_deadband=0.05,
+        altitude_hold_enabled=True,
+        record_position=False,
+        record_attitude=False,
+        record_velocity=False,
+    ):
         self.rc_host = rc_host
         self.rc_port = rc_port
         self.camera_source = camera_source
@@ -89,6 +163,7 @@ class DroneGymEnv:
         self.max_yaw_rate = max_yaw_rate
         self.hover_throttle = hover_throttle
         self.throttle_range = throttle_range
+        self.throttle_scale = float(max(0.1, throttle_scale))
         self.arm_channel = arm_channel
         self.mode_channel = mode_channel
         self.image_w = image_w
@@ -97,6 +172,9 @@ class DroneGymEnv:
         self.measure_loop_delay = measure_loop_delay
         self.loop_delay_log_interval = loop_delay_log_interval
         self.input_sensitivity = float(max(0.0, min(1.0, input_sensitivity)))
+        self.altitude_hold_k = float(altitude_hold_k)
+        self.altitude_hold_deadband = float(altitude_hold_deadband)
+        self.altitude_hold_enabled = bool(altitude_hold_enabled)
         # Max CH4 (yaw) deflection in PWM microseconds from center (1500).
         # The motor mixer's ω²-asymmetry means yaw input at hover produces net
         # upward thrust — full ±500 deflection makes the drone rocket up. Cap
@@ -117,10 +195,10 @@ class DroneGymEnv:
 
         self.running = True
         self._rc_sock = None
-        self._cap = None            # used by RTSP mode
-        self._shm = None            # shared memory for gz-transport subprocess
-        self._camera_proc = None    # gz_camera_worker subprocess
-        self._last_seq = 0          # sequence counter for new-frame detection
+        self._cap = None  # used by RTSP mode
+        self._shm = None  # shared memory for gz-transport subprocess
+        self._camera_proc = None  # gz_camera_worker subprocess
+        self._last_seq = 0  # sequence counter for new-frame detection
         self._frame_size = image_h * image_w * 3
         self._frame_skip = 0
 
@@ -131,6 +209,15 @@ class DroneGymEnv:
         self._loop_delays = collections.deque(maxlen=loop_delay_log_interval)
         self._last_loop_time = None
         self._loop_count = 0
+
+        # Altitude hold (vertical velocity damper)
+        self._pose_tracker = None
+        if self.altitude_hold_enabled:
+            self._pose_tracker = _PoseTracker(
+                k_pwm=self.altitude_hold_k,
+                deadband=self.altitude_hold_deadband,
+                enabled=self.altitude_hold_enabled,
+            )
 
     def _start_camera(self):
         """Open RTSP stream from Gazebo (Docker mode)."""
@@ -169,23 +256,31 @@ class DroneGymEnv:
 
     def _start_gz_camera(self):
         """Launch gz_camera_worker subprocess for gz-transport camera capture."""
-        logger.info("Starting gz-transport camera subprocess for topic: %s",
-                    self.gz_camera_topic)
+        logger.info(
+            "Starting gz-transport camera subprocess for topic: %s",
+            self.gz_camera_topic,
+        )
 
         shm_size = 1 + self._frame_size
         self._shm = SharedMemory(create=True, size=shm_size)
         self._shm.buf[0] = 0
-        logger.info("Created shared memory '%s' (%d bytes)",
-                    self._shm.name, shm_size)
+        logger.info("Created shared memory '%s' (%d bytes)", self._shm.name, shm_size)
 
         worker_path = str(Path(__file__).parent / "gz_camera_worker.py")
 
         self._camera_proc = subprocess.Popen(
-            ["uv", "run", "--env-file", ".env",
-             "python", worker_path,
-             self.gz_camera_topic,
-             str(self.image_w), str(self.image_h),
-             self._shm.name],
+            [
+                "uv",
+                "run",
+                "--env-file",
+                ".env",
+                "python",
+                worker_path,
+                self.gz_camera_topic,
+                str(self.image_w),
+                str(self.image_h),
+                self._shm.name,
+            ],
             env=os.environ.copy(),
         )
         logger.info("Camera worker started (PID %d)", self._camera_proc.pid)
@@ -197,11 +292,17 @@ class DroneGymEnv:
         seq = self._shm.buf[0]
         if seq != self._last_seq:
             self._last_seq = seq
-            frame_bytes = bytes(self._shm.buf[1:1 + self._frame_size])
+            frame_bytes = bytes(self._shm.buf[1 : 1 + self._frame_size])
             self.frame = np.frombuffer(frame_bytes, dtype=np.uint8).reshape(
-                self.image_h, self.image_w, 3)
+                self.image_h, self.image_w, 3
+            )
             if self._frame_skip == 0:
-                logger.info("Frame updated (seq=%d, shape=%s, dtype=%s)", seq, self.frame.shape, self.frame.dtype)
+                logger.info(
+                    "Frame updated (seq=%d, shape=%s, dtype=%s)",
+                    seq,
+                    self.frame.shape,
+                    self.frame.dtype,
+                )
             self._frame_skip = (self._frame_skip + 1) % 30
 
     def _send_rc(self, channels):
@@ -211,9 +312,9 @@ class DroneGymEnv:
         = 40 bytes total.
         """
         timestamp = time.time()
-        packet = struct.pack('<d', timestamp)
+        packet = struct.pack("<d", timestamp)
         for ch in channels:
-            packet += struct.pack('<H', int(ch))
+            packet += struct.pack("<H", int(ch))
         try:
             self._rc_sock.sendto(packet, (self.rc_host, self.rc_port))
         except OSError as e:
@@ -248,8 +349,28 @@ class DroneGymEnv:
 
         # CH3: motor throttle — bipolar around hover.
         alt = max(-1.0, min(1.0, self.altitude))
-        channels[2] = int(max(1000, min(2000,
-            self.hover_throttle + alt * self.throttle_range)))
+        alt_scaled = pow(abs(alt), self.throttle_scale) * (1 if alt >= 0 else -1)
+
+        # Altitude hold damper: when altitude stick is in deadband, bias throttle
+        # by -k * vz to counteract vertical drift.
+        alt_hold_bias = 0
+        if self._pose_tracker is not None and self._pose_tracker.enabled:
+            if abs(alt) < self.altitude_hold_deadband:
+                vz = self._pose_tracker.get_vz()
+                alt_hold_bias = int(-self._pose_tracker.k_pwm * vz)
+        alt_hold_bias = max(-200, min(200, alt_hold_bias))
+
+        channels[2] = int(
+            max(
+                1000,
+                min(
+                    2000,
+                    self.hover_throttle
+                    + alt_scaled * self.throttle_range
+                    + alt_hold_bias,
+                ),
+            )
+        )
 
         # CH4: yaw — capped separately from pitch sensitivity. At hover
         # throttle, yaw deflection adds net thrust via ω² mixer asymmetry;
@@ -289,9 +410,9 @@ class DroneGymEnv:
         # Phase 2: Arm — send 1s of armed packets (throttle low, AUX1 high, AUX2 high)
         logger.info("Arming BetaFlight (1s)...")
         arm_channels = list(disarm_channels)
-        arm_channels[self.arm_channel] = 2000   # AUX1 armed
+        arm_channels[self.arm_channel] = 2000  # AUX1 armed
         arm_channels[self.mode_channel] = 2000  # AUX2 angle mode
-        arm_channels[2] = 1000                  # throttle low during arm
+        arm_channels[2] = 1000  # throttle low during arm
         for _ in range(50):
             if not self.running:
                 return
@@ -310,13 +431,17 @@ class DroneGymEnv:
             loop_count += 1
             if loop_count % 100 == 0:
                 logger.info(
-                    "rc: steer=%.2f thr=%.2f alt=%.2f → "
-                    "pitch=%d yaw=%d throttle=%d",
-                    self.steering, self.throttle, self.altitude,
-                    channels[1], channels[3], channels[2])
+                    "rc: steer=%.2f thr=%.2f alt=%.2f → pitch=%d yaw=%d throttle=%d",
+                    self.steering,
+                    self.throttle,
+                    self.altitude,
+                    channels[1],
+                    channels[3],
+                    channels[2],
+                )
 
             # RTSP mode: poll for frames every other iteration
-            if self.camera_source == 'rtsp':
+            if self.camera_source == "rtsp":
                 self._frame_skip += 1
                 if self._frame_skip % 2 == 0:
                     self._capture_frame()
@@ -340,7 +465,13 @@ class DroneGymEnv:
         Background thread entry point.
         Starts camera, then runs the BetaFlight control loop.
         """
-        if self.camera_source == 'rtsp':
+        if self.altitude_hold_enabled:
+            logger.info("Subscribing to pose topic for altitude hold...")
+            if not _init_pose_subscriber():
+                logger.warning("Pose subscription failed, altitude hold disabled")
+                self._pose_tracker = None
+
+        if self.camera_source == "rtsp":
             self._start_camera()
         else:
             self._start_gz_camera()
@@ -372,8 +503,9 @@ class DroneGymEnv:
                         avg = sum(delays) / len(delays)
                         lo = min(delays)
                         hi = max(delays)
-                        logger.info("loop delay: avg=%.1fms min=%.1fms max=%.1fms",
-                                    avg, lo, hi)
+                        logger.info(
+                            "loop delay: avg=%.1fms min=%.1fms max=%.1fms", avg, lo, hi
+                        )
             self._last_loop_time = now
 
         # Set control inputs
@@ -389,8 +521,12 @@ class DroneGymEnv:
         self.altitude = float(altitude)
 
         # Read camera frame
-        if self.camera_source == 'gz_transport':
+        if self.camera_source == "gz_transport":
             self._read_gz_frame()
+
+        # Update pose tracker for altitude hold damper
+        if self._pose_tracker is not None:
+            self._pose_tracker.update()
 
         # Simulated camera delay
         current_frame = self.frame
@@ -400,7 +536,9 @@ class DroneGymEnv:
             # Find the frame that is delay_ms old
             target_time = now_ms - self.simulated_delay_ms
             output_frame = self._delay_buffer[0][1]  # oldest as fallback
-            while len(self._delay_buffer) > 1 and self._delay_buffer[1][0] <= target_time:
+            while (
+                len(self._delay_buffer) > 1 and self._delay_buffer[1][0] <= target_time
+            ):
                 self._delay_buffer.popleft()
             output_frame = self._delay_buffer[0][1]
         else:
@@ -427,8 +565,7 @@ class DroneGymEnv:
         if self._cap is not None:
             self._cap.release()
         if self._camera_proc is not None:
-            logger.info("Terminating camera worker (PID %d)...",
-                        self._camera_proc.pid)
+            logger.info("Terminating camera worker (PID %d)...", self._camera_proc.pid)
             self._camera_proc.terminate()
             try:
                 self._camera_proc.wait(timeout=3)

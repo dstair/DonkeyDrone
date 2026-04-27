@@ -128,8 +128,12 @@ def run_yaw_test(rc_sock, throttle_pwm=1000, yaw_pwm=2000, duration_s=3.0):
     At throttle=1000 this validates AIRMODE-disabled state (motors idle, yaw
     should do nothing). At throttle=hover_pwm this validates the quadrotor
     motor-mixer asymmetry (yaw intrinsically adds thrust via ω²)."""
-    logger.info("=== Yaw bleed test: throttle=%d, yaw=%d, %.1fs ===",
-                throttle_pwm, yaw_pwm, duration_s)
+    logger.info(
+        "=== Yaw bleed test: throttle=%d, yaw=%d, %.1fs ===",
+        throttle_pwm,
+        yaw_pwm,
+        duration_s,
+    )
 
     # Baseline: same throttle, yaw centered
     logger.info("Baseline: throttle=%d, yaw centered, 2s", throttle_pwm)
@@ -142,10 +146,12 @@ def run_yaw_test(rc_sock, throttle_pwm=1000, yaw_pwm=2000, duration_s=3.0):
         if baseline_alt_start is not None and baseline_alt_end is not None
         else None
     )
-    logger.info("Baseline: %s → %s (delta %s)",
-                f"{baseline_alt_start:.3f}m" if baseline_alt_start is not None else "?",
-                f"{baseline_alt_end:.3f}m" if baseline_alt_end is not None else "?",
-                f"{baseline_delta:+.3f}m" if baseline_delta is not None else "?")
+    logger.info(
+        "Baseline: %s → %s (delta %s)",
+        f"{baseline_alt_start:.3f}m" if baseline_alt_start is not None else "?",
+        f"{baseline_alt_end:.3f}m" if baseline_alt_end is not None else "?",
+        f"{baseline_delta:+.3f}m" if baseline_delta is not None else "?",
+    )
 
     # Reset throttle low briefly to try to settle back down (only effective
     # at low altitudes; above ~0.5m the drone keeps coasting upward).
@@ -153,8 +159,12 @@ def run_yaw_test(rc_sock, throttle_pwm=1000, yaw_pwm=2000, duration_s=3.0):
     hold(rc_sock, make_channels(1000, armed=True), 2.0)
 
     # Yaw applied
-    logger.info("Yaw applied: throttle=%d, yaw=%d, sampling altitude %.1fs...",
-                throttle_pwm, yaw_pwm, duration_s)
+    logger.info(
+        "Yaw applied: throttle=%d, yaw=%d, sampling altitude %.1fs...",
+        throttle_pwm,
+        yaw_pwm,
+        duration_s,
+    )
     hold(rc_sock, make_channels(throttle_pwm, armed=True, yaw_pwm=1500), 1.0)  # settle
     yaw_alt_start = query_pose()[2] if query_pose() else None
     samples = []
@@ -173,16 +183,23 @@ def run_yaw_test(rc_sock, throttle_pwm=1000, yaw_pwm=2000, duration_s=3.0):
     )
 
     for t, alt in samples:
-        print(f"  yaw=on t={t:.2f}s alt={alt:.3f}m" if alt is not None
-              else f"  yaw=on t={t:.2f}s alt=?")
+        print(
+            f"  yaw=on t={t:.2f}s alt={alt:.3f}m"
+            if alt is not None
+            else f"  yaw=on t={t:.2f}s alt=?"
+        )
 
     logger.info("--- Yaw test summary ---")
-    logger.info("Baseline delta: %s",
-                f"{baseline_delta:+.3f}m" if baseline_delta is not None else "?")
-    logger.info("Yaw-applied delta: %s (start=%s end=%s)",
-                f"{yaw_delta:+.3f}m" if yaw_delta is not None else "?",
-                f"{yaw_alt_start:.3f}m" if yaw_alt_start is not None else "?",
-                f"{yaw_alt_end:.3f}m" if yaw_alt_end is not None else "?")
+    logger.info(
+        "Baseline delta: %s",
+        f"{baseline_delta:+.3f}m" if baseline_delta is not None else "?",
+    )
+    logger.info(
+        "Yaw-applied delta: %s (start=%s end=%s)",
+        f"{yaw_delta:+.3f}m" if yaw_delta is not None else "?",
+        f"{yaw_alt_start:.3f}m" if yaw_alt_start is not None else "?",
+        f"{yaw_alt_end:.3f}m" if yaw_alt_end is not None else "?",
+    )
     if baseline_delta is not None and yaw_delta is not None:
         bleed = yaw_delta - baseline_delta
         verdict = "YAW BLEED (thrust rises on yaw)" if bleed > 0.2 else "clean"
@@ -203,12 +220,16 @@ def _sample_alt_over(rc_sock, channels, duration_s, dt=0.25):
 
 def _print_samples(label, samples):
     for t, alt in samples:
-        print(f"  {label} t={t:.2f}s alt={alt:.3f}m" if alt is not None
-              else f"  {label} t={t:.2f}s alt=?")
+        print(
+            f"  {label} t={t:.2f}s alt={alt:.3f}m"
+            if alt is not None
+            else f"  {label} t={t:.2f}s alt=?"
+        )
 
 
-def run_yaw_airborne_test(rc_sock, hover_pwm=1495, climb_pwm=1600,
-                          climb_s=4.0, phase_s=3.0, yaw_pwm=2000):
+def run_yaw_airborne_test(
+    rc_sock, hover_pwm=1495, climb_pwm=1600, climb_s=4.0, phase_s=3.0, yaw_pwm=2000
+):
     """Reproduce "yaw while airborne → won't descend" bug.
 
     Phases (arm sequence already done by main):
@@ -221,22 +242,30 @@ def run_yaw_airborne_test(rc_sock, hover_pwm=1495, climb_pwm=1600,
     The bug manifests as: phase D altitude stays ~flat or keeps climbing,
     while phase B descends normally.
     """
-    logger.info("=== Yaw-airborne test (hover=%d climb=%d yaw=%d) ===",
-                hover_pwm, climb_pwm, yaw_pwm)
+    logger.info(
+        "=== Yaw-airborne test (hover=%d climb=%d yaw=%d) ===",
+        hover_pwm,
+        climb_pwm,
+        yaw_pwm,
+    )
 
     # --- Phase A: climb ---
     logger.info("A: climbing at CH3=%d for %.1fs", climb_pwm, climb_s)
     a_samples = _sample_alt_over(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
     _print_samples("A-climb", a_samples)
     alt_after_climb = a_samples[-1][1] if a_samples else None
-    logger.info("A: altitude after climb = %s",
-                f"{alt_after_climb:.3f}m" if alt_after_climb is not None else "?")
+    logger.info(
+        "A: altitude after climb = %s",
+        f"{alt_after_climb:.3f}m" if alt_after_climb is not None else "?",
+    )
 
     # --- Phase B: baseline descent, no yaw ---
     logger.info("B: baseline descent, CH3=1000 yaw=centered, %.1fs", phase_s)
     pos = query_pose()
     b_start = pos[2] if pos else None
-    b_samples = _sample_alt_over(rc_sock, make_channels(1000, armed=True, yaw_pwm=1500), phase_s)
+    b_samples = _sample_alt_over(
+        rc_sock, make_channels(1000, armed=True, yaw_pwm=1500), phase_s
+    )
     _print_samples("B-cut-no-yaw", b_samples)
     b_end = b_samples[-1][1] if b_samples else None
 
@@ -245,22 +274,30 @@ def run_yaw_airborne_test(rc_sock, hover_pwm=1495, climb_pwm=1600,
     hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
     pos = query_pose()
     alt_after_reclimb = pos[2] if pos else None
-    logger.info("Altitude after re-climb = %s",
-                f"{alt_after_reclimb:.3f}m" if alt_after_reclimb is not None else "?")
+    logger.info(
+        "Altitude after re-climb = %s",
+        f"{alt_after_reclimb:.3f}m" if alt_after_reclimb is not None else "?",
+    )
 
     # --- Phase C: yaw at hover throttle ---
     logger.info("C: yaw at hover, CH3=%d yaw=%d, %.1fs", hover_pwm, yaw_pwm, phase_s)
     pos = query_pose()
     c_start = pos[2] if pos else None
-    c_samples = _sample_alt_over(rc_sock, make_channels(hover_pwm, armed=True, yaw_pwm=yaw_pwm), phase_s)
+    c_samples = _sample_alt_over(
+        rc_sock, make_channels(hover_pwm, armed=True, yaw_pwm=yaw_pwm), phase_s
+    )
     _print_samples("C-yaw-hover", c_samples)
     c_end = c_samples[-1][1] if c_samples else None
 
     # --- Phase D: throttle cut while keeping yaw ---
-    logger.info("D: throttle cut WITH yaw held, CH3=1000 yaw=%d, %.1fs", yaw_pwm, phase_s)
+    logger.info(
+        "D: throttle cut WITH yaw held, CH3=1000 yaw=%d, %.1fs", yaw_pwm, phase_s
+    )
     pos = query_pose()
     d_start = pos[2] if pos else None
-    d_samples = _sample_alt_over(rc_sock, make_channels(1000, armed=True, yaw_pwm=yaw_pwm), phase_s)
+    d_samples = _sample_alt_over(
+        rc_sock, make_channels(1000, armed=True, yaw_pwm=yaw_pwm), phase_s
+    )
     _print_samples("D-cut-yaw-held", d_samples)
     d_end = d_samples[-1][1] if d_samples else None
 
@@ -272,18 +309,24 @@ def run_yaw_airborne_test(rc_sock, hover_pwm=1495, climb_pwm=1600,
     d_d = delta(d_start, d_end)
 
     logger.info("--- Yaw-airborne summary ---")
-    logger.info("B baseline (cut, no yaw):   start=%s end=%s delta=%s",
-                f"{b_start:.3f}m" if b_start is not None else "?",
-                f"{b_end:.3f}m" if b_end is not None else "?",
-                f"{b_d:+.3f}m" if b_d is not None else "?")
-    logger.info("C yaw at hover:             start=%s end=%s delta=%s",
-                f"{c_start:.3f}m" if c_start is not None else "?",
-                f"{c_end:.3f}m" if c_end is not None else "?",
-                f"{c_d:+.3f}m" if c_d is not None else "?")
-    logger.info("D cut WHILE yaw held:       start=%s end=%s delta=%s",
-                f"{d_start:.3f}m" if d_start is not None else "?",
-                f"{d_end:.3f}m" if d_end is not None else "?",
-                f"{d_d:+.3f}m" if d_d is not None else "?")
+    logger.info(
+        "B baseline (cut, no yaw):   start=%s end=%s delta=%s",
+        f"{b_start:.3f}m" if b_start is not None else "?",
+        f"{b_end:.3f}m" if b_end is not None else "?",
+        f"{b_d:+.3f}m" if b_d is not None else "?",
+    )
+    logger.info(
+        "C yaw at hover:             start=%s end=%s delta=%s",
+        f"{c_start:.3f}m" if c_start is not None else "?",
+        f"{c_end:.3f}m" if c_end is not None else "?",
+        f"{c_d:+.3f}m" if c_d is not None else "?",
+    )
+    logger.info(
+        "D cut WHILE yaw held:       start=%s end=%s delta=%s",
+        f"{d_start:.3f}m" if d_start is not None else "?",
+        f"{d_end:.3f}m" if d_end is not None else "?",
+        f"{d_d:+.3f}m" if d_d is not None else "?",
+    )
 
     # Phase C is the primary signal: at hover PWM, yaw should NOT add net
     # thrust. Any significant climb in C means the motor mixer is producing
@@ -291,7 +334,9 @@ def run_yaw_airborne_test(rc_sock, hover_pwm=1495, climb_pwm=1600,
     # into sky" bug.
     if c_d is not None:
         if c_d > 1.0:
-            logger.info("Verdict C (yaw at hover): BUG — climbed %+.2fm at hover+yaw", c_d)
+            logger.info(
+                "Verdict C (yaw at hover): BUG — climbed %+.2fm at hover+yaw", c_d
+            )
         elif c_d < -1.0:
             logger.info("Verdict C (yaw at hover): yaw reduces thrust (%+.2fm)", c_d)
         else:
@@ -301,11 +346,15 @@ def run_yaw_airborne_test(rc_sock, hover_pwm=1495, climb_pwm=1600,
         # or just momentum carried over from C. In sim, drag is low so a
         # drone with upward velocity coasts for a while even at CH3=1000.
         if d_d > 1.0:
-            logger.info("Verdict D (throttle cut + yaw): still climbing %+.2fm — "
-                        "likely phase-C momentum carry-over, not a new thrust bug",
-                        d_d)
+            logger.info(
+                "Verdict D (throttle cut + yaw): still climbing %+.2fm — "
+                "likely phase-C momentum carry-over, not a new thrust bug",
+                d_d,
+            )
         elif d_d > b_d * 0.5:
-            logger.info("Verdict D: partial descent (%+.3f vs baseline %+.3f)", d_d, b_d)
+            logger.info(
+                "Verdict D: partial descent (%+.3f vs baseline %+.3f)", d_d, b_d
+            )
         else:
             logger.info("Verdict D: descends similarly to baseline")
 
@@ -319,8 +368,13 @@ def run_hover_sweep(rc_sock, pwm_low=1450, pwm_high=1550, step=5, hold_s=2.0):
       2. Hold target PWM for hold_s seconds.
       3. Sample altitude at start and end; rate = (end - start) / hold_s.
     """
-    logger.info("=== Hover sweep: %d-%d PWM, step %d, hold %.1fs ===",
-                pwm_low, pwm_high, step, hold_s)
+    logger.info(
+        "=== Hover sweep: %d-%d PWM, step %d, hold %.1fs ===",
+        pwm_low,
+        pwm_high,
+        step,
+        hold_s,
+    )
     results = []
     for pwm in range(pwm_low, pwm_high + 1, step):
         # Settle back to ground so each step starts from the same state
@@ -335,7 +389,9 @@ def run_hover_sweep(rc_sock, pwm_low=1450, pwm_high=1550, step=5, hold_s=2.0):
         if alt_start is not None and alt_end is not None:
             rate = (alt_end - alt_start) / hold_s
             results.append((pwm, alt_start, alt_end, rate))
-            print(f"  pwm={pwm} alt {alt_start:.3f}→{alt_end:.3f}m  rate={rate:+.3f} m/s")
+            print(
+                f"  pwm={pwm} alt {alt_start:.3f}→{alt_end:.3f}m  rate={rate:+.3f} m/s"
+            )
         else:
             results.append((pwm, alt_start, alt_end, None))
             print(f"  pwm={pwm} alt ?→?  rate=?")
@@ -346,7 +402,9 @@ def run_hover_sweep(rc_sock, pwm_low=1450, pwm_high=1550, step=5, hold_s=2.0):
         best = min(valid, key=lambda r: abs(r[3]))
         logger.info("--- Hover sweep summary ---")
         logger.info("Best hover candidate: PWM=%d (rate=%+.3f m/s)", best[0], best[3])
-        logger.info("Set DRONE_HOVER_THROTTLE = %d in your drone_config_XXmm.py", best[0])
+        logger.info(
+            "Set DRONE_HOVER_THROTTLE = %d in your drone_config_XXmm.py", best[0]
+        )
     else:
         logger.info("No valid samples — check pose subscription.")
 
@@ -386,22 +444,134 @@ def run_thrust_ramp(rc_sock):
         logger.info("No clear hover detected.")
 
 
+def run_damper_test(
+    rc_sock, hover_pwm=1495, climb_pwm=1600, climb_s=2.0, sample_s=5.0, dt=0.25
+):
+    """Validate vertical velocity damper.
+
+    Steps:
+      A. Climb to ~2m at climb_pwm for climb_s seconds.
+      B. Cut to hover_pwm (altitude stick in deadband), sample altitude for sample_s.
+      C. Assert |vz| < 0.1 m/s within 1s and altitude drift < 0.5m over sample_s.
+
+    This test requires DroneGymEnv's altitude hold enabled, or it will just
+    coast upward after throttle cut.
+    """
+    logger.info("=== Damper test: hover=%d climb=%d ===", hover_pwm, climb_pwm)
+
+    # --- Phase A: climb ---
+    logger.info("A: climbing at CH3=%d for %.1fs", climb_pwm, climb_s)
+    hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+    pos = query_pose()
+    alt_a = pos[2] if pos else None
+    logger.info(
+        "A: altitude after climb = %s", f"{alt_a:.3f}m" if alt_a is not None else "?"
+    )
+
+    # --- Phase B: hover with damper active ---
+    logger.info("B: holding at hover PWM=%d, sampling %.1fs...", hover_pwm, sample_s)
+
+    samples = []
+    n_samples = int(sample_s / dt)
+    for i in range(n_samples):
+        hold(rc_sock, make_channels(hover_pwm, armed=True), dt)
+        pos = query_pose()
+        alt = pos[2] if pos else None
+        samples.append(((i + 1) * dt, alt))
+
+    # --- Check results ---
+    alt_start = samples[0][1] if samples else None
+    alt_end = samples[-1][1] if samples else None
+
+    if alt_start is None or alt_end is None:
+        logger.warning("No pose samples — cannot validate damper")
+        return
+
+    # Compute velocity by linear regression over all samples
+    times = [s[0] for s in samples if s[1] is not None]
+    alts = [s[1] for s in samples if s[1] is not None]
+    if len(times) >= 2:
+        # Simple average velocity
+        vz_avg = (alts[-1] - alts[0]) / (times[-1] - times[0])
+    else:
+        vz_avg = None
+
+    # Check first 1s window for rapid settling
+    early = [(t, a) for t, a in samples if t <= 1.0 and a is not None]
+    if len(early) >= 2:
+        vz_early = (early[-1][1] - early[0][1]) / (early[-1][0] - early[0][0])
+    else:
+        vz_early = None
+
+    drift = abs(alt_end - alt_start)
+
+    logger.info("--- Damper test summary ---")
+    logger.info(
+        "Start: %s, End: %s, Drift: %s",
+        f"{alt_start:.3f}m" if alt_start is not None else "?",
+        f"{alt_end:.3f}m" if alt_end is not None else "?",
+        f"{drift:.3f}m",
+    )
+    if vz_early is not None:
+        logger.info(
+            "Early vz (0-1s): %+.3f m/s %s",
+            vz_early,
+            "(settled)" if abs(vz_early) < 0.1 else "(NOT settled)",
+        )
+    if vz_avg is not None:
+        logger.info(
+            "Avg vz (%.1fs): %+.3f m/s %s",
+            sample_s,
+            vz_avg,
+            "(holding)" if abs(vz_avg) < 0.1 else "(drifting)",
+        )
+
+    # Assertions
+    if vz_early is not None and abs(vz_early) >= 0.1:
+        logger.warning("FAIL: early vz %+.3f m/s >= 0.1 m/s (not settled)", vz_early)
+    if drift >= 0.5:
+        logger.warning("FAIL: drift %+.3f m >= 0.5m over %.1fs", drift, sample_s)
+    if vz_early is not None and abs(vz_early) < 0.1 and drift < 0.5:
+        logger.info("PASS: damper holding altitude within tolerance")
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=["thrust", "yaw", "yaw-airborne", "hover", "both"], default="both",
-                        help="Which test(s) to run (default: both)")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["thrust", "yaw", "yaw-airborne", "hover", "both", "damper"],
+        default="both",
+        help="Which test(s) to run (default: both)",
+    )
     parser.add_argument("--hover-low", type=int, default=1450)
     parser.add_argument("--hover-high", type=int, default=1550)
     parser.add_argument("--hover-step", type=int, default=5)
-    parser.add_argument("--yaw-throttle", type=int, default=1000,
-                        help="CH3 PWM during yaw test (default 1000 = airmode check; use hover PWM to test motor-mixer asymmetry)")
-    parser.add_argument("--yaw-pwm", type=int, default=2000,
-                        help="CH4 PWM during yaw test (default 2000 = full right)")
-    parser.add_argument("--airborne-hover", type=int, default=1495,
-                        help="Hover PWM for yaw-airborne test")
-    parser.add_argument("--airborne-climb", type=int, default=1550,
-                        help="Climb PWM for yaw-airborne test (just above hover)")
+    parser.add_argument(
+        "--yaw-throttle",
+        type=int,
+        default=1000,
+        help="CH3 PWM during yaw test (default 1000 = airmode check; use hover PWM to test motor-mixer asymmetry)",
+    )
+    parser.add_argument(
+        "--yaw-pwm",
+        type=int,
+        default=2000,
+        help="CH4 PWM during yaw test (default 2000 = full right)",
+    )
+    parser.add_argument(
+        "--airborne-hover",
+        type=int,
+        default=1495,
+        help="Hover PWM for yaw-airborne test",
+    )
+    parser.add_argument(
+        "--airborne-climb",
+        type=int,
+        default=1550,
+        help="Climb PWM for yaw-airborne test (just above hover)",
+    )
     parser.add_argument("--airborne-climb-s", type=float, default=2.0)
     parser.add_argument("--airborne-phase-s", type=float, default=3.0)
     args = parser.parse_args()
@@ -428,15 +598,25 @@ def main():
         run_yaw_test(rc_sock, throttle_pwm=args.yaw_throttle, yaw_pwm=args.yaw_pwm)
 
     if args.mode == "yaw-airborne":
-        run_yaw_airborne_test(rc_sock,
-                              hover_pwm=args.airborne_hover,
-                              climb_pwm=args.airborne_climb,
-                              climb_s=args.airborne_climb_s,
-                              phase_s=args.airborne_phase_s,
-                              yaw_pwm=args.yaw_pwm)
+        run_yaw_airborne_test(
+            rc_sock,
+            hover_pwm=args.airborne_hover,
+            climb_pwm=args.airborne_climb,
+            climb_s=args.airborne_climb_s,
+            phase_s=args.airborne_phase_s,
+            yaw_pwm=args.yaw_pwm,
+        )
 
     if args.mode == "hover":
         run_hover_sweep(rc_sock, args.hover_low, args.hover_high, args.hover_step)
+
+    if args.mode == "damper":
+        run_damper_test(
+            rc_sock,
+            hover_pwm=args.airborne_hover,
+            climb_pwm=args.airborne_climb,
+            climb_s=args.airborne_climb_s,
+        )
 
     if args.mode in ("thrust", "both"):
         run_thrust_ramp(rc_sock)

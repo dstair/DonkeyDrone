@@ -46,8 +46,12 @@ BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 # ---- Flight Control Mapping (Angle mode) ----
 DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
 DRONE_HOVER_THROTTLE = 1497  # PWM that produces hover thrust (altitude=0). Measured via `test_thrust.sh --mode=hover`.
-DRONE_THROTTLE_RANGE = 100  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
-DRONE_THROTTLE_STEP_SIZE = 0.1  # keyboard step per keypress (deflection, snaps back to 0 on release)
+DRONE_THROTTLE_RANGE = (
+    100  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
+)
+DRONE_THROTTLE_STEP_SIZE = (
+    0.1  # keyboard step per keypress (deflection, snaps back to 0 on release)
+)
 
 # Max yaw rate scaling (steering input maps to yaw)
 DRONE_MAX_YAW_RATE = 90.0
@@ -62,6 +66,18 @@ DRONE_INPUT_SENSITIVITY = 0.1
 # deflections make the drone climb on every turn. Keep this small (20–40).
 DRONE_YAW_PWM_CAP = 30
 
+# ---- Altitude Hold (Vertical Velocity Damper) ----
+# Proportional gain (PWM per m/s): -k_pwm * vz added to throttle when
+# altitude stick is in deadband. Start with k=30 (1 m/s climb gets -30 PWM).
+DRONE_ALTITUDE_HOLD_K = 30.0
+
+# Deadband around altitude=0 where damper is active (in normalized [-1,1] units).
+# Stick outside this range bypasses damper so climb/descend commands dominate.
+DRONE_ALTITUDE_HOLD_DEADBAND = 0.05
+
+# Enable vertical velocity damper. Set False to disable and use raw throttle.
+DRONE_ALTITUDE_HOLD_ENABLED = True
+
 # ---- Camera Source ----
 # "gz_transport" - native macOS: Gazebo Harmonic via gz-transport (GPU-accelerated)
 #                  Discover topic: gz topic -l | grep camera
@@ -71,9 +87,7 @@ DRONE_CAMERA_SOURCE = "gz_transport"
 # gz-transport camera topic (native macOS mode).
 # Must match the world name in your launch script. Run `gz topic -l | grep camera`
 # to confirm the topic on your setup.
-DRONE_GZ_CAMERA_TOPIC = (
-    "/world/drone_course_85mm/model/betaloop_drone_cam_85mm/link/camera_link/sensor/camera/image"
-)
+DRONE_GZ_CAMERA_TOPIC = "/world/drone_course_85mm/model/betaloop_drone_cam_85mm/link/camera_link/sensor/camera/image"
 
 # RTSP camera stream URL (Docker mode only -- used when DRONE_CAMERA_SOURCE = "rtsp")
 # DRONE_RTSP_URL = "rtsp://127.0.0.1:8554/live"

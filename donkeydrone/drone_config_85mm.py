@@ -4,7 +4,7 @@
 # Configuration overrides for flying a drone in BetaFlight SITL + Gazebo simulator.
 # Use with: python drone_manage.py drive --myconfig=drone_config_85mm.py
 #   (FlyWoo Flylens 85mm profile, ~125g AUW, 85mm wheelbase)
-#
+#   https://flywoo.net/products/flylens-85-hd-o4-2s-whoop-fpv-drone
 # The drone uses the same DonkeyCar pipeline as a car, with a different
 # semantic mapping (BetaFlight Angle mode):
 #   steering [-1, 1]  ->  yaw rate
@@ -47,7 +47,7 @@ BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
 DRONE_HOVER_THROTTLE = 1497  # PWM that produces hover thrust (altitude=0). Measured via `test_thrust.sh --mode=hover`.
 DRONE_THROTTLE_RANGE = (
-    100  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
+    20  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
 )
 DRONE_THROTTLE_STEP_SIZE = (
     0.1  # keyboard step per keypress (deflection, snaps back to 0 on release)
@@ -57,13 +57,13 @@ DRONE_THROTTLE_STEP_SIZE = (
 DRONE_MAX_YAW_RATE = 90.0
 
 
-DRONE_ANGLE_MODE=False
+DRONE_ANGLE_MODE=True # this appears to always set to Acro mode regardless of True/FLse
 DRONE_YAW_THROTTLE_FEEDFORWARD = 0.0
 
 # Input sensitivity multiplier [0.0–1.0]: scales stick deflection sent to
 # BetaFlight. 1.0 = full deflection (±500 PWM from center on pitch/yaw);
 # 0.3 = gentler, easier-to-fly commands.
-DRONE_INPUT_SENSITIVITY = 0.1
+DRONE_INPUT_SENSITIVITY = 0.2
 
 # CH4 yaw deflection cap in PWM microseconds from center (1500). Yaw input at
 # hover PWM produces net upward thrust via motor-mixer ω² asymmetry — larger
@@ -77,10 +77,10 @@ DRONE_ALTITUDE_HOLD_K = 30.0
 
 # Deadband around altitude=0 where damper is active (in normalized [-1,1] units).
 # Stick outside this range bypasses damper so climb/descend commands dominate.
-DRONE_ALTITUDE_HOLD_DEADBAND = 0.05
+DRONE_ALTITUDE_HOLD_DEADBAND = 0.1
 
 # Enable vertical velocity damper. Set False to disable and use raw throttle.
-DRONE_ALTITUDE_HOLD_ENABLED = False
+DRONE_ALTITUDE_HOLD_ENABLED = True
 
 # ---- Camera Source ----
 # "gz_transport" - native macOS: Gazebo Harmonic via gz-transport (GPU-accelerated)

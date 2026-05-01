@@ -4,6 +4,7 @@
 # Configuration overrides for flying a drone in BetaFlight SITL + Gazebo simulator.
 # Use with: python drone_manage.py drive --myconfig=drone_config_65mm.py
 #   (BetaFPV Air65 profile, ~31g AUW, 65mm wheelbase)
+#   https://betafpv.com/products/air65-brushless-whoop-quadcopter
 #
 # The drone uses the same DonkeyCar pipeline as a car, with a different
 # semantic mapping (set by DRONE_ANGLE_MODE below):
@@ -53,7 +54,7 @@ DRONE_ANGLE_MODE = False
 
 DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
 DRONE_HOVER_THROTTLE = 1492  # In-flight hover PWM (measured via `test_thrust.sh --mode=damper-sim` — the damper itself converges here)
-DRONE_THROTTLE_RANGE = 150  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
+DRONE_THROTTLE_RANGE = 20  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
 # Apply quadratic scaling to altitude input: at high TWR, more throttle gives
 # disproportionate thrust. scale**2 = 1 gives linear; lower values gentler slope.
 DRONE_THROTTLE_SCALE = 0.5
@@ -92,7 +93,7 @@ DRONE_YAW_THROTTLE_FEEDFORWARD = 0.0
 # ---- Altitude Hold (Vertical Velocity Damper) ----
 # Proportional gain (PWM per m/s): -k_pwm * vz added to throttle when
 # altitude stick is in deadband. Start with k=30 (1 m/s climb gets -30 PWM).
-DRONE_ALTITUDE_HOLD_K = 30.0
+DRONE_ALTITUDE_HOLD_K = 10.0
 
 # Deadband around altitude=0 where damper is active (in normalized [-1,1] units).
 # Stick outside this range bypasses damper so climb/descend commands dominate.

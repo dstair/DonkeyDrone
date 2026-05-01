@@ -117,9 +117,11 @@ for cfg_attempt in 1 2; do
 # `set +e` so the intentional exit 42 from the config script doesn't trip
 # `set -e` before we can check the return code.
 set +e
-SKIP_CLI_PROBE="$([ "$cfg_attempt" = "2" ] && echo 1 || echo 0)" python3 -c "
+SKIP_CLI_PROBE="$([ "$cfg_attempt" = "2" ] && echo 1 || echo 0)" \
+AIRFRAME="$AIRFRAME" python3 -c "
 import socket, time, struct, sys, os
 SKIP_CLI = os.environ.get('SKIP_CLI_PROBE') == '1'
+AIRFRAME = os.environ.get('AIRFRAME', '65mm')
 
 def msp_send(sock, cmd, payload=b''):
     size = len(payload)
@@ -229,7 +231,15 @@ def cli_drain(sock, timeout=0.5, match=None):
 # deflection, producing a step-function motor asymmetry that lifts the
 # drone ~20m on every turn (see --mode=yaw-airborne test). Reducing P/I/D/F
 # restores proportional response.
-YAW_PID = {'p_yaw': '20', 'i_yaw': '10', 'd_yaw': '0', 'f_yaw': '20'}
+#
+# 65mm Air65 (~31g) has 4x less mass and rotational inertia than the 85mm
+# Flylens (~125g), so the same gains produce 4x the motor differential
+# per stick deg → yaw-induced roll/pitch the angle loop can't catch.
+# Scale the gains down ~4x for 65mm.
+if AIRFRAME == '65mm':
+    YAW_PID = {'p_yaw': '5', 'i_yaw': '2', 'd_yaw': '0', 'f_yaw': '5'}
+else:
+    YAW_PID = {'p_yaw': '20', 'i_yaw': '10', 'd_yaw': '0', 'f_yaw': '20'}
 
 # CLI phase. Probing via CLI latches BF's CLI arming-disable flag on the
 # running SITL — MSP_REBOOT doesn't reliably re-init the MSP service on this

@@ -413,6 +413,71 @@ class DroneGymEnv:
 
         return channels
 
+    def _query_arming_flags(self, timeout=0.5):
+        """Query MSP_STATUS_EX over TCP 5761 and return BF's arming-disable flags.
+
+        Returns (flags_uint32, [flag_name, ...]); on failure returns (None, []).
+        flags == 0 means BF has no arming-disable conditions and (with AUX1
+        high) should be armed.
+        """
+        flag_names = [
+            "NO_GYRO", "FAILSAFE", "RX_FAILSAFE", "NOT_DISARMED",
+            "BOXFAILSAFE", "RUNAWAY", "CRASH", "THROTTLE", "ANGLE",
+            "BOOT_GRACE", "NOPREARM", "LOAD", "CALIBRATING", "CLI",
+            "CMS_MENU", "BST", "MSP", "PARALYZE", "GPS", "RESC",
+            "DSHOT_TELEM", "REBOOT_REQ", "DSHOT_BB", "ACC_CAL",
+            "MOTOR_PROTO", "CRASHFLIP", "ALTHOLD", "POSHOLD", "ARM_SWITCH",
+        ]
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect((self.rc_host, 5761))
+            cmd = 150  # MSP_STATUS_EX
+            frame = b"$M<" + bytes([0, cmd, 0 ^ cmd])
+            sock.send(frame)
+            resp = b""
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                resp += chunk
+                if (
+                    len(resp) >= 5
+                    and resp[:3] == b"$M>"
+                    and len(resp) >= 6 + resp[3]
+                ):
+                    break
+            if len(resp) < 5 or resp[:3] != b"$M>":
+                return (None, [])
+            payload = resp[5 : 5 + resp[3]]
+            if len(payload) < 20:
+                return (None, [])
+            flags_byte_count = payload[15] & 0x0F
+            offset = 16 + flags_byte_count
+            if len(payload) < offset + 5:
+                return (None, [])
+            flags = struct.unpack("<I", payload[offset + 1 : offset + 5])[0]
+            active = [
+                flag_names[i]
+                for i in range(min(len(flag_names), 29))
+                if flags & (1 << i)
+            ]
+            return (flags, active)
+        except OSError as e:
+            logger.warning("MSP arming-flags query failed: %s", e)
+            return (None, [])
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
     def _betaflight_loop(self):
         """Main control loop: arm BetaFlight and send RC commands at 50Hz.
 
@@ -421,32 +486,71 @@ class DroneGymEnv:
         self._rc_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         logger.info("RC UDP socket ready → %s:%d", self.rc_host, self.rc_port)
 
-        # Phase 1: Disarm — send 1s of disarmed packets (throttle low, AUX1 low)
-        logger.info("Sending disarm packets (1s)...")
+        # Reusable channel templates. The disarm packet holds the sticks
+        # centered with throttle low and AUX1 low so BF clears any latched
+        # FAILSAFE / ARM_SWITCH disable bits before we toggle AUX1 high.
         disarm_channels = [1000] * 16
         disarm_channels[0] = 1500  # roll centered
         disarm_channels[1] = 1500  # pitch centered
         disarm_channels[2] = 1000  # throttle low
         disarm_channels[3] = 1500  # yaw centered
-        for _ in range(50):
-            if not self.running:
-                return
-            self._send_rc(disarm_channels)
-            time.sleep(0.02)
+        disarm_channels[self.mode_channel] = 2000 if self.angle_mode else 1000
 
-        # Phase 2: Arm — send 1s of armed packets (throttle low, AUX1 high, AUX2 high)
-        logger.info("Arming BetaFlight (1s)...")
         arm_channels = list(disarm_channels)
         arm_channels[self.arm_channel] = 2000  # AUX1 armed
-        arm_channels[self.mode_channel] = 2000 if self.angle_mode else 1000
-        arm_channels[2] = 1000  # throttle low during arm
-        for _ in range(50):
-            if not self.running:
-                return
-            self._send_rc(arm_channels)
-            time.sleep(0.02)
 
-        logger.info("Armed — entering control loop at 50Hz")
+        # Disarm + arm sequence with arming-flags verification and retry.
+        # The FAILSAFE bit takes a long time to clear after BF spent the
+        # pre-launch window with no RC, so we hold disarm for 3s on the first
+        # attempt; later attempts fall back to 1s since by then RX is healthy.
+        max_attempts = 3
+        armed_ok = False
+        for attempt in range(1, max_attempts + 1):
+            disarm_secs = 3.0 if attempt == 1 else 1.0
+            disarm_iters = int(disarm_secs / 0.02)
+            logger.info(
+                "Arm attempt %d/%d: disarm %.1fs, then arm 1s...",
+                attempt,
+                max_attempts,
+                disarm_secs,
+            )
+            for _ in range(disarm_iters):
+                if not self.running:
+                    return
+                self._send_rc(disarm_channels)
+                time.sleep(0.02)
+            for _ in range(50):
+                if not self.running:
+                    return
+                self._send_rc(arm_channels)
+                time.sleep(0.02)
+
+            flags, active = self._query_arming_flags()
+            if flags is None:
+                logger.warning(
+                    "Arm attempt %d: MSP query failed; assuming BF unreachable",
+                    attempt,
+                )
+                continue
+            if flags == 0:
+                logger.info("Arm attempt %d: BF armed (arming_flags=0)", attempt)
+                armed_ok = True
+                break
+            logger.warning(
+                "Arm attempt %d: arming_flags=0x%08x %s — retrying",
+                attempt,
+                flags,
+                active,
+            )
+
+        if not armed_ok:
+            logger.error(
+                "Failed to arm BetaFlight after %d attempts. "
+                "Entering control loop anyway — motors will stay at 0 until "
+                "the disable flags clear.",
+                max_attempts,
+            )
+        logger.info("Entering control loop at 50Hz")
 
         # Phase 3: Control loop
         loop_count = 0

@@ -56,19 +56,22 @@ def send_rc(rc_sock, channels):
     rc_sock.sendto(packet, (RC_HOST, RC_PORT))
 
 
-def make_channels(throttle_pwm, armed=True, yaw_pwm=1500):
-    """Create 16-channel RC packet with throttle, yaw, and arm/disarm."""
+FLIGHT_MODE_ANGLE = True  # set False for Acro (CH6 = 1000)
+
+
+def make_channels(throttle_pwm, armed=True, yaw_pwm=1500, pitch_pwm=1500):
+    """Create 16-channel RC packet with throttle, yaw, pitch, and arm/disarm."""
     channels = [1000] * 16
     channels[0] = 1500  # CH1 roll (centered)
-    channels[1] = 1500  # CH2 pitch (centered - no forward tilt)
+    channels[1] = pitch_pwm  # CH2 pitch
     channels[2] = throttle_pwm  # CH3 throttle
     channels[3] = yaw_pwm  # CH4 yaw
     channels[4] = 2000 if armed else 1000  # CH5 AUX1 arm switch
-    channels[5] = 2000  # CH6 AUX2 = angle mode
+    channels[5] = 2000 if FLIGHT_MODE_ANGLE else 1000  # CH6 AUX2 angle/acro
     return channels
 
 
-_pose_state = {"node": None, "latest": None}
+_pose_state = {"node": None, "latest": None, "latest_quat": None}
 
 
 def _init_pose_subscriber():
@@ -91,6 +94,8 @@ def _init_pose_subscriber():
         for p in msg.pose:
             if "betaloop" in p.name.lower():
                 _pose_state["latest"] = (p.position.x, p.position.y, p.position.z)
+                q = p.orientation
+                _pose_state["latest_quat"] = (q.w, q.x, q.y, q.z)
                 return
 
     if not node.subscribe(Pose_V, POSE_TOPIC, on_pose):
@@ -104,6 +109,26 @@ def _init_pose_subscriber():
 def query_pose():
     """Return latest drone pose (x, y, z) or None if unknown."""
     return _pose_state["latest"]
+
+
+def query_attitude_deg():
+    """Return latest drone attitude (roll, pitch, yaw) in degrees, or None."""
+    q = _pose_state["latest_quat"]
+    if q is None:
+        return None
+    w, x, y, z = q
+    # Standard ZYX quaternion → Euler conversion
+    import math as _m
+    sinr_cosp = 2.0 * (w * x + y * z)
+    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+    roll = _m.atan2(sinr_cosp, cosr_cosp)
+    sinp = 2.0 * (w * y - z * x)
+    sinp = max(-1.0, min(1.0, sinp))
+    pitch = _m.asin(sinp)
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    yaw = _m.atan2(siny_cosp, cosy_cosp)
+    return (_m.degrees(roll), _m.degrees(pitch), _m.degrees(yaw))
 
 
 def hold(rc_sock, channels, duration_s):
@@ -535,13 +560,410 @@ def run_damper_test(
         logger.info("PASS: damper holding altitude within tolerance")
 
 
+def run_pitch_climb_test(
+    rc_sock, hover_pwm=1490, climb_pwm=1550, climb_s=3.0, pitch_s=5.0,
+    pitch_pwm=2000, dt=0.25,
+):
+    """Quantify the "forward throttle → rapid climb" issue.
+
+    In Angle mode at hover throttle, pitching forward should NOT cause a
+    climb — vertical thrust component decreases as cos(angle), so altitude
+    should drop slightly while the drone moves forward. If altitude climbs
+    when CH2 is pushed forward at hover PWM, it indicates either:
+      - BetaFlight is over-compensating motor commands during attitude hold
+      - The mixer is producing excess net thrust under pitch demand
+      - Drag/LiftDrag asymmetry produces lift at forward velocity
+
+    Phases:
+      A. Climb to ~2m at climb_pwm (gives clean test starting altitude)
+      B. Baseline: hover_pwm + pitch centered for pitch_s, sample alt
+      C. Pitch forward: hover_pwm + pitch_pwm for pitch_s, sample alt
+    """
+    logger.info(
+        "=== Pitch-climb test: hover=%d climb=%d pitch=%d pitch_s=%.1f ===",
+        hover_pwm, climb_pwm, pitch_pwm, pitch_s,
+    )
+
+    logger.info("A: climbing at CH3=%d for %.1fs", climb_pwm, climb_s)
+    hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+    pos = query_pose()
+    alt_a = pos[2] if pos else None
+    logger.info("A: altitude after climb = %s",
+                f"{alt_a:.3f}m" if alt_a is not None else "?")
+
+    logger.info("B: baseline hover (CH3=%d, pitch centered), sampling %.1fs",
+                hover_pwm, pitch_s)
+    pos = query_pose()
+    b_start = pos[2] if pos else None
+    b_samples = _sample_alt_over(
+        rc_sock, make_channels(hover_pwm, armed=True, pitch_pwm=1500), pitch_s, dt=dt,
+    )
+    _print_samples("B-pitch-center", b_samples)
+    b_end = b_samples[-1][1] if b_samples else None
+
+    logger.info("Re-climbing at CH3=%d for %.1fs to reset altitude",
+                climb_pwm, climb_s)
+    hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+
+    logger.info("C: pitch forward (CH3=%d, CH2=%d), sampling %.1fs",
+                hover_pwm, pitch_pwm, pitch_s)
+    pos = query_pose()
+    c_start = pos[2] if pos else None
+    c_samples = _sample_alt_over(
+        rc_sock,
+        make_channels(hover_pwm, armed=True, pitch_pwm=pitch_pwm),
+        pitch_s, dt=dt,
+    )
+    _print_samples("C-pitch-fwd", c_samples)
+    c_end = c_samples[-1][1] if c_samples else None
+
+    def delta(s, e):
+        return e - s if s is not None and e is not None else None
+    b_d = delta(b_start, b_end)
+    c_d = delta(c_start, c_end)
+
+    logger.info("--- Pitch-climb summary ---")
+    logger.info(
+        "B baseline (pitch centered): start=%s end=%s delta=%s",
+        f"{b_start:.3f}m" if b_start is not None else "?",
+        f"{b_end:.3f}m" if b_end is not None else "?",
+        f"{b_d:+.3f}m" if b_d is not None else "?",
+    )
+    logger.info(
+        "C pitch forward:             start=%s end=%s delta=%s",
+        f"{c_start:.3f}m" if c_start is not None else "?",
+        f"{c_end:.3f}m" if c_end is not None else "?",
+        f"{c_d:+.3f}m" if c_d is not None else "?",
+    )
+    if b_d is not None and c_d is not None:
+        bleed = c_d - b_d
+        if bleed > 1.0:
+            verdict = f"PITCH BLEED: pitching adds {bleed:+.2f}m climb vs baseline"
+        elif bleed < -1.0:
+            verdict = f"pitching reduces altitude {bleed:+.2f}m vs baseline (expected)"
+        else:
+            verdict = f"clean ({bleed:+.2f}m vs baseline)"
+        logger.info("Verdict: %s", verdict)
+
+
+def run_attitude_test(
+    rc_sock, hover_pwm=1490, climb_pwm=1550, climb_s=3.0, sample_s=5.0,
+    yaw_pwm=1530, dt=0.10,
+):
+    """Quantify "L/R shake" during yaw — sample roll/pitch oscillations.
+
+    Bring the drone to altitude, command yaw with a moderate stick (default
+    yaw_pwm=1530, matching DRONE_YAW_PWM_CAP=30). Sample roll/pitch attitude
+    every dt seconds and report the std-dev / peak-to-peak amplitude — those
+    quantify the wobble.
+
+    Phases:
+      A. Climb to altitude
+      B. Yaw centered at hover, sample attitude — baseline noise
+      C. Yaw applied at hover, sample attitude — wobble during yaw
+    """
+    logger.info(
+        "=== Attitude test: hover=%d climb=%d yaw=%d sample_s=%.1f dt=%.2f ===",
+        hover_pwm, climb_pwm, yaw_pwm, sample_s, dt,
+    )
+
+    logger.info("A: climbing at CH3=%d for %.1fs", climb_pwm, climb_s)
+    hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+    att = query_attitude_deg()
+    logger.info(
+        "A: attitude after climb = %s",
+        f"r={att[0]:+.1f}° p={att[1]:+.1f}° y={att[2]:+.1f}°" if att else "?",
+    )
+
+    def _sample_attitude(channels, dur):
+        n = int(dur / dt)
+        samples = []
+        for i in range(n):
+            hold(rc_sock, channels, dt)
+            att = query_attitude_deg()
+            samples.append(((i + 1) * dt, att))
+        return samples
+
+    def _stats(samples, idx):
+        vals = [s[1][idx] for s in samples if s[1] is not None]
+        if len(vals) < 2:
+            return None
+        mean = sum(vals) / len(vals)
+        var = sum((v - mean) ** 2 for v in vals) / len(vals)
+        std = var ** 0.5
+        ptp = max(vals) - min(vals)
+        return mean, std, ptp
+
+    logger.info("B: baseline (CH4 centered) sampling %.1fs at %.1fHz",
+                sample_s, 1.0 / dt)
+    b = _sample_attitude(make_channels(hover_pwm, armed=True, yaw_pwm=1500), sample_s)
+    b_roll = _stats(b, 0)
+    b_pitch = _stats(b, 1)
+    if b_roll:
+        logger.info("B baseline roll:  mean=%+.2f° std=%.2f° p2p=%.2f°", *b_roll)
+    if b_pitch:
+        logger.info("B baseline pitch: mean=%+.2f° std=%.2f° p2p=%.2f°", *b_pitch)
+
+    logger.info("Re-climbing at CH3=%d for %.1fs to reset altitude",
+                climb_pwm, climb_s)
+    hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+
+    logger.info("C: yaw=%d at hover, sampling %.1fs at %.1fHz",
+                yaw_pwm, sample_s, 1.0 / dt)
+    c = _sample_attitude(make_channels(hover_pwm, armed=True, yaw_pwm=yaw_pwm), sample_s)
+    c_roll = _stats(c, 0)
+    c_pitch = _stats(c, 1)
+    c_yaw = _stats(c, 2)
+    if c_roll:
+        logger.info("C yaw-on roll:    mean=%+.2f° std=%.2f° p2p=%.2f°", *c_roll)
+    if c_pitch:
+        logger.info("C yaw-on pitch:   mean=%+.2f° std=%.2f° p2p=%.2f°", *c_pitch)
+    if c_yaw:
+        # yaw_rate = total yaw delta / sample_s
+        ys = [s[1][2] for s in c if s[1] is not None]
+        if len(ys) >= 2:
+            # Unwrap simple jumps across ±180°
+            unwrap = [ys[0]]
+            for v in ys[1:]:
+                d = v - unwrap[-1]
+                if d > 180:
+                    v -= 360
+                elif d < -180:
+                    v += 360
+                unwrap.append(v)
+            yaw_rate = (unwrap[-1] - unwrap[0]) / sample_s
+            logger.info("C yaw rate: %+.1f°/s over %.1fs", yaw_rate, sample_s)
+
+    logger.info("--- Attitude test summary ---")
+    if b_roll and c_roll:
+        logger.info("Roll  shake increase (std): %.2f° → %.2f° (%+.2f°)",
+                    b_roll[1], c_roll[1], c_roll[1] - b_roll[1])
+    if b_pitch and c_pitch:
+        logger.info("Pitch shake increase (std): %.2f° → %.2f° (%+.2f°)",
+                    b_pitch[1], c_pitch[1], c_pitch[1] - b_pitch[1])
+
+
+def run_inflight_hover_sweep(
+    rc_sock, climb_pwm=1600, climb_s=3.0,
+    pwm_low=1470, pwm_high=1500, step=2, hold_s=1.5, settle_s=0.5,
+):
+    """Find true in-flight hover PWM.
+
+    The ground hover sweep can't see true hover because the drone won't lift
+    off until thrust > weight + LiftDrag-at-zero-velocity. Once airborne,
+    that drag is gone and a much lower PWM can sustain altitude.
+
+    Strategy:
+      A. Climb hard to ~5m so we have headroom.
+      B. For each PWM (high → low), hold for hold_s, sample vz over the
+         second half (skip transient). High → low so each step starts
+         with downward momentum bias, helping us see decel from each PWM.
+
+    The PWM with vz closest to 0 is true hover. With vz vs PWM in hand,
+    we can also estimate the slope (m/s per PWM) for damper tuning.
+    """
+    logger.info(
+        "=== Inflight hover sweep: %d-%d PWM step %d, hold %.1fs ===",
+        pwm_low, pwm_high, step, hold_s,
+    )
+
+    logger.info("A: climbing at CH3=%d for %.1fs", climb_pwm, climb_s)
+    hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+    pos = query_pose()
+    logger.info("A: altitude after climb = %s",
+                f"{pos[2]:.2f}m" if pos else "?")
+
+    results = []
+    # Sweep high → low so we catch the drone before it falls back to ground
+    pwms = list(range(pwm_high, pwm_low - 1, -step))
+    for pwm in pwms:
+        # Hold the PWM for full duration; sample vz over the back half
+        # (front half is transient as motors spool to new RPM)
+        ch = make_channels(pwm, armed=True)
+        # Settle phase
+        hold(rc_sock, ch, settle_s)
+        pos_a = query_pose()
+        t_a = time.time()
+        # Measurement window
+        hold(rc_sock, ch, hold_s - settle_s)
+        pos_b = query_pose()
+        t_b = time.time()
+        if pos_a and pos_b and (t_b - t_a) > 0:
+            vz = (pos_b[2] - pos_a[2]) / (t_b - t_a)
+            alt_b = pos_b[2]
+            results.append((pwm, alt_b, vz))
+            print(f"  pwm={pwm} alt={alt_b:6.2f}m  vz={vz:+.3f} m/s")
+        else:
+            results.append((pwm, None, None))
+            print(f"  pwm={pwm} alt=?  vz=?")
+        # Bail if drone has fallen too low to be in-flight (< 0.5m)
+        if pos_b and pos_b[2] < 0.5:
+            logger.info("Drone too low (%.2fm), stopping sweep", pos_b[2])
+            break
+
+    valid = [r for r in results if r[2] is not None]
+    if not valid:
+        logger.warning("No valid samples — abort.")
+        return
+
+    # Find true hover: PWM where vz crosses zero (or closest to zero)
+    best = min(valid, key=lambda r: abs(r[2]))
+    logger.info("--- Inflight hover sweep summary ---")
+    logger.info("Closest-to-hover: PWM=%d (vz=%+.3f m/s, alt=%.2fm)",
+                best[0], best[2], best[1])
+
+    # Linear interpolation: find zero crossing if we have one
+    pos_vz = [r for r in valid if r[2] > 0]
+    neg_vz = [r for r in valid if r[2] < 0]
+    if pos_vz and neg_vz:
+        # smallest positive vz and largest negative vz (closest pair around 0)
+        p = min(pos_vz, key=lambda r: r[2])
+        n = max(neg_vz, key=lambda r: r[2])
+        if p[0] != n[0]:
+            slope = (p[2] - n[2]) / (p[0] - n[0])  # m/s per PWM
+            zero_pwm = n[0] - n[2] / slope
+            logger.info("Zero-vz interpolated: PWM=%.1f", zero_pwm)
+            logger.info("Slope: %.4f (m/s) per PWM near hover", slope)
+            logger.info("Suggested DRONE_HOVER_THROTTLE = %d", round(zero_pwm))
+    else:
+        logger.info(
+            "No vz zero-crossing found in sweep range — "
+            "true hover is %s than swept range",
+            "lower" if all(r[2] > 0 for r in valid) else "higher",
+        )
+
+
+def run_damper_sim_test(
+    rc_sock, hover_pwm=1490, k_pwm=30.0, climb_pwm=1600, climb_s=3.0,
+    sample_s=8.0, dt=0.05, deadband=0.05, pitch_pwm=1500, pitch_after_s=None,
+    yaw_pwm=1500, yaw_after_s=None, yaw_ff=0.0, yaw_pwm_cap=30,
+):
+    """Emulate drone_gym.py's _PoseTracker damper directly.
+
+    Each tick:
+      vz = (pos_z - prev_pos_z) / dt
+      bias = clamp(-k_pwm * vz, -200, +200)
+      ch3  = clamp(hover_pwm + bias, 1000, 2000)
+
+    If this holds altitude steady (< 0.5m drift over sample_s), the damper
+    logic is sound and the integration in drone_gym.py just needs hover_pwm
+    correctly calibrated.
+    """
+    logger.info(
+        "=== Damper-sim test: hover=%d k_pwm=%.1f sample=%.1fs dt=%.2fs ===",
+        hover_pwm, k_pwm, sample_s, dt,
+    )
+
+    logger.info("A: climbing at CH3=%d for %.1fs", climb_pwm, climb_s)
+    hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+    pos = query_pose()
+    alt_a = pos[2] if pos else None
+    logger.info("A: altitude after climb = %s",
+                f"{alt_a:.2f}m" if alt_a is not None else "?")
+
+    n_ticks = int(sample_s / dt)
+    prev_z = None
+    prev_t = None
+    samples = []  # (t, alt, vz, ch3, yaw_deg)
+    log_skip = max(1, int(0.5 / dt))  # log every 0.5s
+
+    target_alt = alt_a
+    t_start = time.time()
+    for i in range(n_ticks):
+        pos = query_pose()
+        now = time.time()
+        if pos is None:
+            ch3 = hover_pwm
+            yaw_deg = None
+        else:
+            z = pos[2]
+            if prev_z is None:
+                vz = 0.0
+            else:
+                _dt = now - prev_t
+                vz = (z - prev_z) / _dt if _dt > 0 else 0.0
+            prev_z = z
+            prev_t = now
+            bias = -k_pwm * vz
+            bias = max(-200.0, min(200.0, bias))
+            # Mirror drone_gym.py yaw→throttle feed-forward (step + linear).
+            cur_yaw_for_ff = (
+                yaw_pwm if (yaw_after_s is not None and (now - t_start) >= yaw_after_s)
+                else 1500
+            )
+            steer_eq = abs(cur_yaw_for_ff - 1500) / max(1, yaw_pwm_cap)
+            steer_eq = min(1.0, steer_eq)
+            yaw_ff_bias = 0.0
+            if yaw_ff > 0 and steer_eq > 0.01:
+                yaw_ff_bias = -yaw_ff
+            yaw_ff_bias = max(-200.0, min(0.0, yaw_ff_bias))
+            ch3 = int(max(1000, min(2000, hover_pwm + bias + yaw_ff_bias)))
+            att = query_attitude_deg()
+            yaw_deg = att[2] if att else None
+            samples.append((now - t_start, z, vz, ch3, yaw_deg))
+
+        # Optional pitch input applied after pitch_after_s
+        cur_pitch = 1500
+        if pitch_after_s is not None and (now - t_start) >= pitch_after_s:
+            cur_pitch = pitch_pwm
+        # Optional yaw input applied after yaw_after_s
+        cur_yaw = 1500
+        if yaw_after_s is not None and (now - t_start) >= yaw_after_s:
+            cur_yaw = yaw_pwm
+        send_rc(rc_sock, make_channels(
+            ch3, armed=True, pitch_pwm=cur_pitch, yaw_pwm=cur_yaw,
+        ))
+        time.sleep(dt)
+        if i % log_skip == 0 and samples:
+            t, alt, vz, ch3v, yawv = samples[-1]
+            yaw_str = f"{yawv:+.1f}" if yawv is not None else "?"
+            logger.info(
+                "t=%.2fs alt=%.2fm vz=%+.3f m/s ch3=%d yaw=%s°",
+                t, alt, vz, ch3v, yaw_str,
+            )
+
+    if not samples:
+        logger.warning("No samples collected.")
+        return
+
+    alts = [s[1] for s in samples]
+    vzs = [s[2] for s in samples]
+    ch3s = [s[3] for s in samples]
+    drift = alts[-1] - alts[0]
+    # Skip first 1s to ignore spin-down transient when computing settled stats
+    settled = [s for s in samples if s[0] >= 1.0]
+    if settled:
+        s_alts = [s[1] for s in settled]
+        s_vzs = [s[2] for s in settled]
+        s_ch3 = [s[3] for s in settled]
+        s_drift = s_alts[-1] - s_alts[0]
+        s_alt_ptp = max(s_alts) - min(s_alts)
+        s_vz_mean = sum(s_vzs) / len(s_vzs)
+        s_ch3_mean = sum(s_ch3) / len(s_ch3)
+        logger.info("--- Damper-sim summary ---")
+        logger.info("Total drift over %.1fs: %+.3fm", sample_s, drift)
+        logger.info(
+            "After 1s settle: drift=%+.3fm  alt_p2p=%.3fm  vz_mean=%+.3fm/s  ch3_mean=%.1f",
+            s_drift, s_alt_ptp, s_vz_mean, s_ch3_mean,
+        )
+        if abs(s_drift) < 0.5 and abs(s_vz_mean) < 0.1:
+            logger.info("PASS: damper holds altitude (drift<0.5m, vz<0.1m/s)")
+        else:
+            logger.warning(
+                "FAIL: damper not holding (drift=%+.3fm, vz=%+.3fm/s). "
+                "Try increasing k_pwm (currently %.1f).",
+                s_drift, s_vz_mean, k_pwm,
+            )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "--mode",
-        choices=["thrust", "yaw", "yaw-airborne", "hover", "both", "damper"],
+        choices=["thrust", "yaw", "yaw-airborne", "hover", "both", "damper",
+                 "pitch-climb", "attitude", "inflight-hover", "damper-sim"],
         default="both",
         help="Which test(s) to run (default: both)",
     )
@@ -574,7 +996,64 @@ def main():
     )
     parser.add_argument("--airborne-climb-s", type=float, default=2.0)
     parser.add_argument("--airborne-phase-s", type=float, default=3.0)
+    parser.add_argument(
+        "--damper-k",
+        type=float,
+        default=30.0,
+        help="Damper k_pwm (PWM per m/s). Default 30 matches drone_gym.py.",
+    )
+    parser.add_argument(
+        "--damper-pitch-pwm",
+        type=int,
+        default=1500,
+        help="If --damper-pitch-after is set, pitch CH2 to this PWM after that time.",
+    )
+    parser.add_argument(
+        "--damper-pitch-after",
+        type=float,
+        default=None,
+        help="Seconds into damper-sim after which pitch is applied (default: never).",
+    )
+    parser.add_argument(
+        "--damper-sample-s",
+        type=float,
+        default=8.0,
+        help="Damper-sim total sample duration.",
+    )
+    parser.add_argument(
+        "--damper-yaw-pwm",
+        type=int,
+        default=1500,
+        help="If --damper-yaw-after is set, yaw CH4 to this PWM after that time.",
+    )
+    parser.add_argument(
+        "--damper-yaw-after",
+        type=float,
+        default=None,
+        help="Seconds into damper-sim after which yaw is applied (default: never).",
+    )
+    parser.add_argument(
+        "--damper-yaw-ff",
+        type=float,
+        default=0.0,
+        help="Yaw→throttle feed-forward (PWM at full equivalent steer). 0 = off.",
+    )
+    parser.add_argument(
+        "--damper-yaw-cap",
+        type=int,
+        default=30,
+        help="DRONE_YAW_PWM_CAP equivalent — used to convert yaw_pwm to steer_eq.",
+    )
+    parser.add_argument(
+        "--acro",
+        action="store_true",
+        help="Set CH6 = 1000 (Acro mode) instead of 2000 (Angle mode).",
+    )
     args = parser.parse_args()
+
+    global FLIGHT_MODE_ANGLE
+    FLIGHT_MODE_ANGLE = not args.acro
+    logger.info("Flight mode: %s", "Angle" if FLIGHT_MODE_ANGLE else "Acro")
 
     logger.info("Opening RC socket...")
     rc_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -616,6 +1095,48 @@ def main():
             hover_pwm=args.airborne_hover,
             climb_pwm=args.airborne_climb,
             climb_s=args.airborne_climb_s,
+        )
+
+    if args.mode == "pitch-climb":
+        run_pitch_climb_test(
+            rc_sock,
+            hover_pwm=args.airborne_hover,
+            climb_pwm=args.airborne_climb,
+            climb_s=args.airborne_climb_s,
+        )
+
+    if args.mode == "attitude":
+        run_attitude_test(
+            rc_sock,
+            hover_pwm=args.airborne_hover,
+            climb_pwm=args.airborne_climb,
+            climb_s=args.airborne_climb_s,
+        )
+
+    if args.mode == "inflight-hover":
+        run_inflight_hover_sweep(
+            rc_sock,
+            climb_pwm=args.airborne_climb,
+            climb_s=args.airborne_climb_s,
+            pwm_low=args.hover_low,
+            pwm_high=args.hover_high,
+            step=args.hover_step,
+        )
+
+    if args.mode == "damper-sim":
+        run_damper_sim_test(
+            rc_sock,
+            hover_pwm=args.airborne_hover,
+            climb_pwm=args.airborne_climb,
+            climb_s=args.airborne_climb_s,
+            k_pwm=args.damper_k,
+            sample_s=args.damper_sample_s,
+            pitch_pwm=args.damper_pitch_pwm,
+            pitch_after_s=args.damper_pitch_after,
+            yaw_pwm=args.damper_yaw_pwm,
+            yaw_after_s=args.damper_yaw_after,
+            yaw_ff=args.damper_yaw_ff,
+            yaw_pwm_cap=args.damper_yaw_cap,
         )
 
     if args.mode in ("thrust", "both"):

@@ -14,6 +14,11 @@ var driveHandler = new function() {
                 'altitude': 0,
             }
         },
+        'rc': {
+            'pitch': 1500,
+            'yaw': 1500,
+            'throttle': 1000,
+        },
         'brakeOn': true,
         'recording': false,
         'driveMode': "user",
@@ -48,6 +53,7 @@ var driveHandler = new function() {
       driveURL = '/drive'
       socket = new WebSocket('ws://' + location.host + '/wsDrive');
 
+      injectRcPanel()
       setBindings()
 
       joystick_element = document.getElementById('joystick_container');
@@ -98,7 +104,7 @@ var driveHandler = new function() {
                 if(state.hasOwnProperty(key) && state[key] !== data[key]) {
                     if(typeof state[key] === 'object') {
                         // recursively update the state's object field
-                        changed = updateState(state[key], data[key]) && changed;
+                        if(updateState(state[key], data[key])) changed = true;
                     } else {
                         state[key] = data[key];
                         changed = true;
@@ -230,10 +236,36 @@ var driveHandler = new function() {
       });
     }
 
+    var injectRcPanel = function() {
+      if ($('#rc-panel').length) return;
+      var html = ''
+        + '<div id="rc-panel" style="margin-top:10px;padding:8px;'
+        +   'background:#222;color:#eee;border-radius:4px;'
+        +   'font-family:monospace;font-size:14px;">'
+        +   '<div style="font-weight:bold;margin-bottom:4px;">RC PWM (μs)</div>'
+        +   '<div>pitch (fwd/back): <span id="rc-pitch">----</span></div>'
+        +   '<div>yaw (turn):       <span id="rc-yaw">----</span></div>'
+        +   '<div>throttle (motor): <span id="rc-throttle">----</span></div>'
+        + '</div>';
+      var anchor = $('#control-bars');
+      if (anchor.length) {
+        anchor.after(html);
+      } else {
+        $('body').prepend(html);
+      }
+    };
+
+    var updateRcUI = function() {
+      $('#rc-pitch').text(state.rc.pitch);
+      $('#rc-yaw').text(state.rc.yaw);
+      $('#rc-throttle').text(state.rc.throttle);
+    };
+
     var updateUI = function() {
       $("#throttleInput").val(state.tele.user.throttle);
       $("#angleInput").val(state.tele.user.angle);
       $('#mode_select').val(state.driveMode);
+      updateRcUI();
 
       var throttlePercent = Math.round(Math.abs(state.tele.user.throttle) * 100) + '%';
       var steeringPercent = Math.round(Math.abs(state.tele.user.angle) * 100) + '%';

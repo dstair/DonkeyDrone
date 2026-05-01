@@ -6,9 +6,9 @@
 #   (BetaFPV Air65 profile, ~31g AUW, 65mm wheelbase)
 #
 # The drone uses the same DonkeyCar pipeline as a car, with a different
-# semantic mapping (BetaFlight Angle mode):
-#   steering [-1, 1]  ->  yaw rate
-#   throttle [-1, 1]  ->  forward pitch (tilt angle)
+# semantic mapping (set by DRONE_ANGLE_MODE below):
+#   steering [-1, 1]  ->  yaw (rate in Acro, rate→heading in Angle)
+#   throttle [-1, 1]  ->  forward pitch (rate in Acro, bank angle in Angle)
 #   altitude [-1, 1]  ->  motor throttle (bipolar, 0 = hover PWM,
 #                         ±1 = hover ± DRONE_THROTTLE_RANGE)
 # """
@@ -43,10 +43,17 @@ BETAFLIGHT_RC_PORT = 9004
 BETAFLIGHT_ARM_CHANNEL = 4  # AUX1 (0-indexed)
 BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 
-# ---- Flight Control Mapping (Angle mode) ----
+# ---- Flight Control Mapping ----
+# True  = Angle mode (CH6 high) — BetaFlight self-levels; stick → bank angle.
+# False = Acro mode  (CH6 low)  — raw rate command; no self-leveling. Often
+#         smoother under yaw because the angle controller's roll/pitch loops
+#         aren't fighting transient tilt from yaw torque. Drone won't auto-
+#         level if disturbed — must be tested in sim before real flight.
+DRONE_ANGLE_MODE = False
+
 DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
-DRONE_HOVER_THROTTLE = 1490  # PWM that produces hover thrust (altitude=0). Measured via `test_thrust.sh --mode=hover`.
-DRONE_THROTTLE_RANGE = 50  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
+DRONE_HOVER_THROTTLE = 1492  # In-flight hover PWM (measured via `test_thrust.sh --mode=damper-sim` — the damper itself converges here)
+DRONE_THROTTLE_RANGE = 150  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
 # Apply quadratic scaling to altitude input: at high TWR, more throttle gives
 # disproportionate thrust. scale**2 = 1 gives linear; lower values gentler slope.
 DRONE_THROTTLE_SCALE = 0.5
@@ -60,12 +67,27 @@ DRONE_MAX_YAW_RATE = 90.0
 # Input sensitivity multiplier [0.0–1.0]: scales stick deflection sent to
 # BetaFlight. 1.0 = full deflection (±500 PWM from center on pitch/yaw);
 # 0.3 = gentler, easier-to-fly commands.
-DRONE_INPUT_SENSITIVITY = 0.02
+DRONE_INPUT_SENSITIVITY = 0.1
 
 # CH4 yaw deflection cap in PWM microseconds from center (1500). Yaw input at
 # hover PWM produces net upward thrust via motor-mixer ω² asymmetry — larger
 # deflections make the drone climb on every turn. Keep this small (20–40).
 DRONE_YAW_PWM_CAP = 30
+
+# Yaw→throttle feed-forward (PWM step). When |steering| > ~0.01, CH3 is biased
+# down by exactly this many PWM (capped at -200) to cancel the upward thrust
+# from the motor mixer's ω² asymmetry in Angle mode. Empirically the excess
+# thrust is near-constant across yaw magnitude (test_thrust damper-sim
+# 2026-04-28: both yaw=1499 and yaw=1530 needed ~50–60 PWM to hold), hence a
+# flat step. Damper soaks up the residual. Tune via:
+#   ./scripts/test_thrust.sh --mode=damper-sim --airborne-hover=1494 \
+#       --damper-yaw-after=3 --damper-yaw-pwm=<...> --damper-yaw-ff=<...>
+#
+# In Acro mode (DRONE_ANGLE_MODE = False) the angle controller is out of the
+# loop and the upward bleed is small/absent — leaving FF on at 60 just drops
+# CH3 with nothing to cancel, and the drone descends on every yaw input.
+# Keep this 0 while in Acro; retune separately if you go back to Angle.
+DRONE_YAW_THROTTLE_FEEDFORWARD = 0.0
 
 # ---- Altitude Hold (Vertical Velocity Damper) ----
 # Proportional gain (PWM per m/s): -k_pwm * vz added to throttle when
@@ -77,7 +99,7 @@ DRONE_ALTITUDE_HOLD_K = 30.0
 DRONE_ALTITUDE_HOLD_DEADBAND = 0.05
 
 # Enable vertical velocity damper. Set False to disable and use raw throttle.
-DRONE_ALTITUDE_HOLD_ENABLED = True
+DRONE_ALTITUDE_HOLD_ENABLED = False
 
 # ---- Camera Source ----
 # "gz_transport" - native macOS: Gazebo Harmonic via gz-transport (GPU-accelerated)

@@ -56,6 +56,10 @@ DRONE_THROTTLE_STEP_SIZE = (
 # Max yaw rate scaling (steering input maps to yaw)
 DRONE_MAX_YAW_RATE = 90.0
 
+
+DRONE_ANGLE_MODE=False
+DRONE_YAW_THROTTLE_FEEDFORWARD = 0.0
+
 # Input sensitivity multiplier [0.0–1.0]: scales stick deflection sent to
 # BetaFlight. 1.0 = full deflection (±500 PWM from center on pitch/yaw);
 # 0.3 = gentler, easier-to-fly commands.
@@ -76,7 +80,7 @@ DRONE_ALTITUDE_HOLD_K = 30.0
 DRONE_ALTITUDE_HOLD_DEADBAND = 0.05
 
 # Enable vertical velocity damper. Set False to disable and use raw throttle.
-DRONE_ALTITUDE_HOLD_ENABLED = True
+DRONE_ALTITUDE_HOLD_ENABLED = False
 
 # ---- Camera Source ----
 # "gz_transport" - native macOS: Gazebo Harmonic via gz-transport (GPU-accelerated)

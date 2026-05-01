@@ -57,7 +57,7 @@ from donkeycar.parts.kinematics import (
 
 
 class LocalWebController(_LocalWebController):
-    """Override to use local templates from this repo."""
+    """Override to use local templates and broadcast drone RC telemetry."""
 
     def __init__(self, *args, **kwargs):
         import os
@@ -65,10 +65,77 @@ class LocalWebController(_LocalWebController):
         this_dir = os.path.dirname(os.path.realpath(__file__))
         local_static = os.path.join(this_dir, "templates", "static")
 
-        if os.path.exists(local_static):
-            self.static_file_path = local_static
-
         super().__init__(*args, **kwargs)
+
+        # Donkeycar's parent registered /static/ at its own templates/static.
+        # We want local files (e.g. our patched main.js) to take precedence
+        # while donkeycar's bootstrap/jquery/etc. continue to be served from
+        # the upstream path. Insert a higher-priority handler that only serves
+        # files which actually exist locally.
+        if os.path.isdir(local_static):
+            from tornado.web import StaticFileHandler
+            from tornado.routing import URLSpec
+
+            local_dir = local_static
+            upstream_dir = self.static_file_path
+
+            class _OverlayStatic(StaticFileHandler):
+                def initialize(self, path=None):
+                    self._dirs = (local_dir, upstream_dir)
+                    super().initialize(path=local_dir)
+
+                async def get(self, path, include_body=True):
+                    for d in self._dirs:
+                        candidate = os.path.join(d, path)
+                        if os.path.isfile(candidate):
+                            self.root = d
+                            break
+                    return await super().get(path, include_body)
+
+            spec = URLSpec(r"/static/(.*)", _OverlayStatic)
+            # Insert before donkeycar's /static/ rule so we match first.
+            self.default_router.rules.insert(0, spec)
+
+        self._last_rc = {"pitch": None, "yaw": None, "throttle": None}
+
+    def run_threaded(
+        self,
+        img_arr=None,
+        num_records=0,
+        mode=None,
+        recording=None,
+        rc_pitch=None,
+        rc_yaw=None,
+        rc_throttle=None,
+    ):
+        result = super().run_threaded(
+            img_arr=img_arr,
+            num_records=num_records,
+            mode=mode,
+            recording=recording,
+        )
+
+        # Broadcast PWMs only when they change to keep websocket traffic low.
+        rc_changes = {}
+        for key, val in (
+            ("pitch", rc_pitch),
+            ("yaw", rc_yaw),
+            ("throttle", rc_throttle),
+        ):
+            if val is None:
+                continue
+            ival = int(val)
+            if self._last_rc[key] != ival:
+                self._last_rc[key] = ival
+                rc_changes[key] = ival
+
+        if rc_changes and self.loop is not None:
+            self.loop.add_callback(lambda: self.update_wsclients({"rc": rc_changes}))
+
+        return result
+
+    def run(self, *args, **kwargs):
+        return self.run_threaded(*args, **kwargs)
 
 
 from donkeycar.parts.explode import ExplodeDict
@@ -113,16 +180,18 @@ def add_drone_sim(V, cfg):
         loop_delay_log_interval=getattr(cfg, "LOOP_DELAY_LOG_INTERVAL", 100),
         input_sensitivity=getattr(cfg, "DRONE_INPUT_SENSITIVITY", 1.0),
         yaw_pwm_cap=getattr(cfg, "DRONE_YAW_PWM_CAP", 30),
+        yaw_throttle_feedforward=getattr(cfg, "DRONE_YAW_THROTTLE_FEEDFORWARD", 0.0),
         altitude_hold_k=getattr(cfg, "DRONE_ALTITUDE_HOLD_K", 30.0),
         altitude_hold_deadband=getattr(cfg, "DRONE_ALTITUDE_HOLD_DEADBAND", 0.05),
         altitude_hold_enabled=getattr(cfg, "DRONE_ALTITUDE_HOLD_ENABLED", True),
+        angle_mode=getattr(cfg, "DRONE_ANGLE_MODE", True),
         record_position=cfg.DRONE_RECORD_POSITION,
         record_attitude=cfg.DRONE_RECORD_ATTITUDE,
         record_velocity=cfg.DRONE_RECORD_VELOCITY,
     )
 
     inputs = ["steering", "throttle", "altitude"]
-    outputs = ["cam/image_array"]
+    outputs = ["cam/image_array", "rc/pitch", "rc/yaw", "rc/throttle"]
 
     if cfg.DRONE_RECORD_POSITION:
         outputs += ["pos/pos_x", "pos/pos_y", "pos/pos_z"]
@@ -738,7 +807,15 @@ def add_user_controller(V, cfg, use_joystick, input_image="ui/image_array"):
     ctr = LocalWebController(port=cfg.WEB_CONTROL_PORT, mode=cfg.WEB_INIT_MODE)
     V.add(
         ctr,
-        inputs=[input_image, "tub/num_records", "user/mode", "recording"],
+        inputs=[
+            input_image,
+            "tub/num_records",
+            "user/mode",
+            "recording",
+            "rc/pitch",
+            "rc/yaw",
+            "rc/throttle",
+        ],
         outputs=[
             "user/steering",
             "user/throttle",

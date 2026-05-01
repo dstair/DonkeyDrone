@@ -147,9 +147,11 @@ class DroneGymEnv:
         loop_delay_log_interval=100,
         input_sensitivity=1.0,
         yaw_pwm_cap=30,
+        yaw_throttle_feedforward=0.0,
         altitude_hold_k=30.0,
         altitude_hold_deadband=0.05,
         altitude_hold_enabled=True,
+        angle_mode=True,
         record_position=False,
         record_attitude=False,
         record_velocity=False,
@@ -175,11 +177,16 @@ class DroneGymEnv:
         self.altitude_hold_k = float(altitude_hold_k)
         self.altitude_hold_deadband = float(altitude_hold_deadband)
         self.altitude_hold_enabled = bool(altitude_hold_enabled)
+        self.angle_mode = bool(angle_mode)
         # Max CH4 (yaw) deflection in PWM microseconds from center (1500).
         # The motor mixer's ω²-asymmetry means yaw input at hover produces net
         # upward thrust — full ±500 deflection makes the drone rocket up. Cap
         # yaw small to keep the climb induced by turning manageable.
         self.yaw_pwm_cap = int(max(0, min(500, yaw_pwm_cap)))
+        # Yaw-induced thrust feed-forward: yaw input creates net upward thrust
+        # via motor-mixer ω² asymmetry. Subtract this many PWM from CH3 at
+        # |steer|=1 (linear in |steer|). Tune via test_thrust damper-sim.
+        self.yaw_throttle_feedforward = float(max(0.0, yaw_throttle_feedforward))
         self.record_position = record_position
         self.record_attitude = record_attitude
         self.record_velocity = record_velocity
@@ -188,6 +195,9 @@ class DroneGymEnv:
         self.steering = 0.0
         self.throttle = 0.0
         self.altitude = 0.0  # altitude control input [-1, 1] → motor throttle
+        self.last_pitch_pwm = 1500
+        self.last_yaw_pwm = 1500
+        self.last_throttle_pwm = 1000
         self.frame = np.zeros((image_h, image_w, 3), dtype=np.uint8)
         self.position = (0.0, 0.0, 0.0)
         self.attitude = (0.0, 0.0, 0.0)
@@ -360,6 +370,18 @@ class DroneGymEnv:
                 alt_hold_bias = int(-self._pose_tracker.k_pwm * vz)
         alt_hold_bias = max(-200, min(200, alt_hold_bias))
 
+        steer = max(-1.0, min(1.0, self.steering))
+
+        # Yaw→throttle feed-forward (always subtractive — both yaw directions
+        # add upward thrust via mixer ω² asymmetry). Empirically the excess
+        # thrust is near-constant across yaw magnitude (BF yaw PID I-term winds
+        # up to similar motor differential regardless of stick magnitude — see
+        # test_thrust damper-sim 2026-04-28), so a flat step works best.
+        yaw_ff_bias = 0
+        if self.yaw_throttle_feedforward > 0 and abs(steer) > 0.01:
+            yaw_ff_bias = -int(self.yaw_throttle_feedforward)
+        yaw_ff_bias = max(-200, min(0, yaw_ff_bias))
+
         channels[2] = int(
             max(
                 1000,
@@ -367,7 +389,8 @@ class DroneGymEnv:
                     2000,
                     self.hover_throttle
                     + alt_scaled * self.throttle_range
-                    + alt_hold_bias,
+                    + alt_hold_bias
+                    + yaw_ff_bias,
                 ),
             )
         )
@@ -375,14 +398,18 @@ class DroneGymEnv:
         # CH4: yaw — capped separately from pitch sensitivity. At hover
         # throttle, yaw deflection adds net thrust via ω² mixer asymmetry;
         # a small cap keeps the yaw-induced climb manageable.
-        steer = max(-1.0, min(1.0, self.steering))
         channels[3] = int(max(1000, min(2000, 1500 + steer * self.yaw_pwm_cap)))
 
         # CH5 (AUX1): armed
         channels[self.arm_channel] = 2000
 
-        # CH6 (AUX2): angle mode
-        channels[self.mode_channel] = 2000
+        # CH6 (AUX2): 2000 = Angle (self-leveling), 1000 = Acro (rate mode)
+        channels[self.mode_channel] = 2000 if self.angle_mode else 1000
+
+        # Snapshot for telemetry / UI display
+        self.last_pitch_pwm = channels[1]
+        self.last_throttle_pwm = channels[2]
+        self.last_yaw_pwm = channels[3]
 
         return channels
 
@@ -411,7 +438,7 @@ class DroneGymEnv:
         logger.info("Arming BetaFlight (1s)...")
         arm_channels = list(disarm_channels)
         arm_channels[self.arm_channel] = 2000  # AUX1 armed
-        arm_channels[self.mode_channel] = 2000  # AUX2 angle mode
+        arm_channels[self.mode_channel] = 2000 if self.angle_mode else 1000
         arm_channels[2] = 1000  # throttle low during arm
         for _ in range(50):
             if not self.running:
@@ -544,7 +571,12 @@ class DroneGymEnv:
         else:
             output_frame = current_frame
 
-        outputs = [output_frame]
+        outputs = [
+            output_frame,
+            self.last_pitch_pwm,
+            self.last_yaw_pwm,
+            self.last_throttle_pwm,
+        ]
 
         if self.record_position:
             outputs += [self.position[0], self.position[1], self.position[2]]
@@ -553,8 +585,6 @@ class DroneGymEnv:
         if self.record_velocity:
             outputs += [self.velocity[0], self.velocity[1], self.velocity[2]]
 
-        if len(outputs) == 1:
-            return output_frame
         return outputs
 
     def shutdown(self):

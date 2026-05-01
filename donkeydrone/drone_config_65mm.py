@@ -50,7 +50,7 @@ BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 #         smoother under yaw because the angle controller's roll/pitch loops
 #         aren't fighting transient tilt from yaw torque. Drone won't auto-
 #         level if disturbed — must be tested in sim before real flight.
-DRONE_ANGLE_MODE = False
+DRONE_ANGLE_MODE = True
 
 DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
 DRONE_HOVER_THROTTLE = 1492  # In-flight hover PWM (measured via `test_thrust.sh --mode=damper-sim` — the damper itself converges here)

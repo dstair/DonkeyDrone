@@ -414,19 +414,28 @@ class DroneGymEnv:
         return channels
 
     def _query_arming_flags(self, timeout=0.5):
-        """Query MSP_STATUS_EX over TCP 5761 and return BF's arming-disable flags.
+        """Query MSP_STATUS_EX and return BF's arming-disable + active-mode state.
 
-        Returns (flags_uint32, [flag_name, ...]); on failure returns (None, []).
-        flags == 0 means BF has no arming-disable conditions and (with AUX1
-        high) should be armed.
+        Returns (arming_flags, [arming_flag_name, ...], active_mode_bits,
+        [active_mode_name, ...]). On failure returns (None, [], None, []).
+        arming_flags == 0 means BF has no arming-disable conditions and (with
+        AUX1 high) should be armed. active_mode_bits is BF's legacy flight-
+        mode bitmap — bit 0 = ARM, bit 1 = ANGLE, bit 2 = HORIZON.
         """
-        flag_names = [
+        arming_flag_names = [
             "NO_GYRO", "FAILSAFE", "RX_FAILSAFE", "NOT_DISARMED",
             "BOXFAILSAFE", "RUNAWAY", "CRASH", "THROTTLE", "ANGLE",
             "BOOT_GRACE", "NOPREARM", "LOAD", "CALIBRATING", "CLI",
             "CMS_MENU", "BST", "MSP", "PARALYZE", "GPS", "RESC",
             "DSHOT_TELEM", "REBOOT_REQ", "DSHOT_BB", "ACC_CAL",
             "MOTOR_PROTO", "CRASHFLIP", "ALTHOLD", "POSHOLD", "ARM_SWITCH",
+        ]
+        # Legacy flight-mode bit positions (BF boxId order).
+        mode_flag_names = [
+            "ARM", "ANGLE", "HORIZON", "ANTIGRAVITY", "MAG", "HEADFREE",
+            "HEADADJ", "CAMSTAB", "PASSTHRU", "BEEPER", "LEDLOW",
+            "CALIB", "OSD", "TELEMETRY", "SERVO1", "SERVO2", "SERVO3",
+            "BLACKBOX", "FAILSAFE_MODE", "AIRMODE",
         ]
         sock = None
         try:
@@ -453,24 +462,30 @@ class DroneGymEnv:
                 ):
                     break
             if len(resp) < 5 or resp[:3] != b"$M>":
-                return (None, [])
+                return (None, [], None, [])
             payload = resp[5 : 5 + resp[3]]
             if len(payload) < 20:
-                return (None, [])
+                return (None, [], None, [])
+            mode_bits = struct.unpack("<I", payload[6:10])[0]
+            active_modes = [
+                mode_flag_names[i]
+                for i in range(min(len(mode_flag_names), 32))
+                if mode_bits & (1 << i)
+            ]
             flags_byte_count = payload[15] & 0x0F
             offset = 16 + flags_byte_count
             if len(payload) < offset + 5:
-                return (None, [])
+                return (None, [], mode_bits, active_modes)
             flags = struct.unpack("<I", payload[offset + 1 : offset + 5])[0]
-            active = [
-                flag_names[i]
-                for i in range(min(len(flag_names), 29))
+            active_arming = [
+                arming_flag_names[i]
+                for i in range(min(len(arming_flag_names), 29))
                 if flags & (1 << i)
             ]
-            return (flags, active)
+            return (flags, active_arming, mode_bits, active_modes)
         except OSError as e:
-            logger.warning("MSP arming-flags query failed: %s", e)
-            return (None, [])
+            logger.warning("MSP status query failed: %s", e)
+            return (None, [], None, [])
         finally:
             if sock is not None:
                 try:
@@ -525,7 +540,9 @@ class DroneGymEnv:
                 self._send_rc(arm_channels)
                 time.sleep(0.02)
 
-            flags, active = self._query_arming_flags()
+            flags, active_arming, mode_bits, active_modes = (
+                self._query_arming_flags()
+            )
             if flags is None:
                 logger.warning(
                     "Arm attempt %d: MSP query failed; assuming BF unreachable",
@@ -533,14 +550,27 @@ class DroneGymEnv:
                 )
                 continue
             if flags == 0:
-                logger.info("Arm attempt %d: BF armed (arming_flags=0)", attempt)
+                logger.info(
+                    "Arm attempt %d: BF armed (arming_flags=0, modes=%s, "
+                    "requested=%s)",
+                    attempt,
+                    active_modes or "(none)",
+                    "ANGLE" if self.angle_mode else "ACRO",
+                )
+                if self.angle_mode and "ANGLE" not in (active_modes or []):
+                    logger.warning(
+                        "ANGLE mode requested but not active in BF "
+                        "(mode_bits=0x%08x). Check aux bindings in eeprom — "
+                        "see scripts/start.sh CLI block.",
+                        mode_bits or 0,
+                    )
                 armed_ok = True
                 break
             logger.warning(
                 "Arm attempt %d: arming_flags=0x%08x %s — retrying",
                 attempt,
                 flags,
-                active,
+                active_arming,
             )
 
         if not armed_ok:

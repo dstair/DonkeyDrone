@@ -269,7 +269,27 @@ if not SKIP_CLI:
         if ('= ' + v).encode() not in r:
             yaw_ok = False
 
-    if mixer_ok and yaw_ok:
+    # Mode bindings:
+    #   slot 0: ARM   on AUX1 (channel idx 0), range [1700, 2100]
+    #   slot 1: ANGLE on AUX2 (channel idx 1), range [1700, 2100]
+    # Format: 'aux <slot> <modeId> <auxChannel> <start> <end> <link> <linkId>'
+    # modeIds: 0=ARM, 1=ANGLE. Saving via CLI persists across BF restarts —
+    # MSP_SET_MODE_RANGE alone only writes RAM, which used to leave runs
+    # silently in Acro because the post-restart MSP path didn't always take.
+    AUX_BINDINGS = [
+        ('0', '0 0 0 1700 2100 0 0'),  # ARM on AUX1
+        ('1', '1 1 1 1700 2100 0 0'),  # ANGLE on AUX2
+    ]
+    aux_ok = True
+    s.sendall(b'aux\r\n')
+    aux_resp = cli_drain(s, timeout=1.5, match=b'# ')
+    print('  probe aux: %r' % aux_resp[:240])
+    for slot, expected in AUX_BINDINGS:
+        needle = ('aux ' + slot + ' ' + expected).encode()
+        if needle not in aux_resp:
+            aux_ok = False
+
+    if mixer_ok and yaw_ok and aux_ok:
         print('  CLI: values already at target, no save needed')
     else:
         if not mixer_ok:
@@ -279,21 +299,27 @@ if not SKIP_CLI:
             for k, v in YAW_PID.items():
                 s.sendall(('set ' + k + ' = ' + v + '\r\n').encode())
                 cli_drain(s, timeout=1.5, match=b'# ')
+        if not aux_ok:
+            for slot, expected in AUX_BINDINGS:
+                s.sendall(('aux ' + slot + ' ' + expected + '\r\n').encode())
+                cli_drain(s, timeout=1.5, match=b'# ')
         # 'save noreboot' persists to eeprom.bin WITHOUT exiting the SITL
         # process. (Bare 'save' issues a reset that kills SITL on macOS —
         # the CLI reboot path is exit(), not a warm restart.)
         s.sendall(b'save noreboot\r\n')
         cli_drain(s, timeout=2.0, match=b'# ')
-        print('  CLI: applied mixer_type=LINEAR + yaw PIDs %s, saved noreboot' % YAW_PID)
+        print('  CLI: applied mixer_type=LINEAR + yaw PIDs %s + aux bindings, saved noreboot' % YAW_PID)
 
     s.close()
     print('  Exiting to restart BetaFlight (clears CLI arming flag)')
     sys.exit(42)
 
-# MSP_SET_MODE_RANGE (35): ARM on AUX1, ANGLE on AUX2
+# MSP_SET_MODE_RANGE (35): redundant fallback — bindings are now saved to
+# eeprom in the CLI block above. Left here so a wiped eeprom still gets
+# usable bindings for the current session even if the CLI save path failed.
 msp_send(s, 35, struct.pack('BBBBB', 0, 0, 0, 32, 48))  # ARM on AUX1
 msp_send(s, 35, struct.pack('BBBBB', 1, 1, 1, 32, 48))  # ANGLE on AUX2
-print('  Modes set: ARM on AUX1, ANGLE on AUX2')
+print('  Modes set (fallback): ARM on AUX1, ANGLE on AUX2')
 
 # Change failsafe from GPS_RESCUE(2) to AUTO_LANDING(0) if needed
 fs = msp_send(s, 75)  # MSP_FAILSAFE_CONFIG

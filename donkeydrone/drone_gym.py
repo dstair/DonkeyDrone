@@ -39,6 +39,91 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _pose_node = None
+_sim_telemetry = None
+
+
+def _quat_to_euler_deg(w, x, y, z):
+    """Convert quaternion to roll/pitch/yaw degrees."""
+    import math
+
+    sinr_cosp = 2.0 * (w * x + y * z)
+    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+    sinp = 2.0 * (w * y - z * x)
+    sinp = max(-1.0, min(1.0, sinp))
+    pitch = math.asin(sinp)
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+    return (math.degrees(roll), math.degrees(pitch), math.degrees(yaw))
+
+
+class _SimTelemetry:
+    """Keeps latest Gazebo pose-derived telemetry and raw IMU samples."""
+
+    def __init__(self, world, model_name, imu_topic=None):
+        from gz.transport13 import Node
+        from gz.msgs10.imu_pb2 import IMU
+        from gz.msgs10.pose_v_pb2 import Pose_V
+
+        self.node = Node()
+        self.model_name = model_name.lower()
+        self.pose_topic = f"/world/{world}/dynamic_pose/info"
+        self.imu_topic = imu_topic or (
+            f"/world/{world}/model/{model_name}/link/base_link/sensor/imu_sensor/imu"
+        )
+        self.position = (0.0, 0.0, 0.0)
+        self.attitude = (0.0, 0.0, 0.0)
+        self.velocity = (0.0, 0.0, 0.0)
+        self.imu = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self._prev_position = None
+        self._prev_time = None
+
+        if not self.node.subscribe(Pose_V, self.pose_topic, self._on_pose):
+            raise RuntimeError(f"Could not subscribe to {self.pose_topic}")
+        if not self.node.subscribe(IMU, self.imu_topic, self._on_imu):
+            raise RuntimeError(f"Could not subscribe to {self.imu_topic}")
+
+    def _on_pose(self, msg):
+        now = time.time()
+        for p in msg.pose:
+            if self.model_name in p.name.lower():
+                pos = (p.position.x, p.position.y, p.position.z)
+                q = p.orientation
+                self.position = pos
+                self.attitude = _quat_to_euler_deg(q.w, q.x, q.y, q.z)
+                if self._prev_position is not None and self._prev_time is not None:
+                    dt = now - self._prev_time
+                    if dt > 0:
+                        self.velocity = tuple(
+                            (pos[i] - self._prev_position[i]) / dt for i in range(3)
+                        )
+                self._prev_position = pos
+                self._prev_time = now
+                return
+
+    def _on_imu(self, msg):
+        acl = msg.linear_acceleration
+        gyr = msg.angular_velocity
+        self.imu = (acl.x, acl.y, acl.z, gyr.x, gyr.y, gyr.z)
+
+
+def _init_sim_telemetry(world, model_name, imu_topic=None):
+    """Subscribe once to Gazebo pose and IMU topics."""
+    global _sim_telemetry
+    if _sim_telemetry is not None:
+        return _sim_telemetry
+    try:
+        _sim_telemetry = _SimTelemetry(world, model_name, imu_topic=imu_topic)
+    except Exception as e:
+        logger.warning("Gazebo telemetry subscription failed: %s", e)
+        return None
+    logger.info(
+        "Subscribed to Gazebo telemetry: pose=%s imu=%s",
+        _sim_telemetry.pose_topic,
+        _sim_telemetry.imu_topic,
+    )
+    return _sim_telemetry
 
 
 def _init_pose_subscriber():
@@ -155,6 +240,10 @@ class DroneGymEnv:
         record_position=False,
         record_attitude=False,
         record_velocity=False,
+        record_imu=False,
+        gz_world=None,
+        gz_model_name=None,
+        gz_imu_topic=None,
     ):
         self.rc_host = rc_host
         self.rc_port = rc_port
@@ -190,6 +279,13 @@ class DroneGymEnv:
         self.record_position = record_position
         self.record_attitude = record_attitude
         self.record_velocity = record_velocity
+        self.record_imu = record_imu
+        self.gz_world = gz_world or os.environ.get("GZ_WORLD", "drone_course_65mm")
+        self.gz_model_name = gz_model_name or (
+            "betaloop_drone_cam_85mm" if self.gz_world.endswith("85mm")
+            else "betaloop_drone_cam_65mm"
+        )
+        self.gz_imu_topic = gz_imu_topic
 
         # Shared state between threads
         self.steering = 0.0
@@ -205,6 +301,7 @@ class DroneGymEnv:
         self.position = (0.0, 0.0, 0.0)
         self.attitude = (0.0, 0.0, 0.0)
         self.velocity = (0.0, 0.0, 0.0)
+        self.imu = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
         self.running = True
         self._rc_sock = None
@@ -630,6 +727,21 @@ class DroneGymEnv:
         Background thread entry point.
         Starts camera, then runs the BetaFlight control loop.
         """
+        needs_telemetry = (
+            self.record_position
+            or self.record_attitude
+            or self.record_velocity
+            or self.record_imu
+        )
+        if needs_telemetry:
+            self._sim_telemetry = _init_sim_telemetry(
+                self.gz_world,
+                self.gz_model_name,
+                imu_topic=self.gz_imu_topic,
+            )
+        else:
+            self._sim_telemetry = None
+
         if self.altitude_hold_enabled:
             logger.info("Subscribing to pose topic for altitude hold...")
             if not _init_pose_subscriber():
@@ -696,6 +808,12 @@ class DroneGymEnv:
         if self._pose_tracker is not None:
             self._pose_tracker.update()
 
+        if getattr(self, "_sim_telemetry", None) is not None:
+            self.position = self._sim_telemetry.position
+            self.attitude = self._sim_telemetry.attitude
+            self.velocity = self._sim_telemetry.velocity
+            self.imu = self._sim_telemetry.imu
+
         # Simulated camera delay
         current_frame = self.frame
         if self.simulated_delay_ms > 0:
@@ -725,6 +843,15 @@ class DroneGymEnv:
             outputs += [self.attitude[0], self.attitude[1], self.attitude[2]]
         if self.record_velocity:
             outputs += [self.velocity[0], self.velocity[1], self.velocity[2]]
+        if self.record_imu:
+            outputs += [
+                self.imu[0],
+                self.imu[1],
+                self.imu[2],
+                self.imu[3],
+                self.imu[4],
+                self.imu[5],
+            ]
 
         return outputs
 
@@ -745,5 +872,10 @@ class DroneGymEnv:
             self._camera_proc = None
         if self._shm is not None:
             self._shm.close()
-            self._shm.unlink()
+            try:
+                self._shm.unlink()
+            except FileNotFoundError:
+                # The camera worker/resource_tracker can win this cleanup race
+                # on process exit. The segment is already gone, which is fine.
+                pass
             self._shm = None

@@ -18,6 +18,7 @@ import logging
 
 import cv2
 import numpy as np
+from multiprocessing import resource_tracker
 from multiprocessing.shared_memory import SharedMemory
 
 from gz.transport13 import Node
@@ -44,6 +45,8 @@ def main():
 
     # Attach to shared memory created by the parent process
     shm = SharedMemory(name=shm_name, create=False)
+    # Parent owns unlinking. Avoid child resource_tracker racing parent cleanup.
+    resource_tracker.unregister(shm._name, "shared_memory")
     logger.info("Attached to shared memory '%s' (%d bytes)", shm_name, shm.size)
 
     frame_count = [0]

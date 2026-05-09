@@ -17,16 +17,28 @@ class TubDataset(Dataset):
         self.seq_len = seq_len
         self.transform = transform
         self.records = []
+        self.imu_keys = [
+            'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
+            'imu/gyr_x', 'imu/gyr_y', 'imu/gyr_z'
+        ]
+        self.missing_imu_records = 0
         
         # Load all record metadata
         for tub_path in tub_paths:
-            catalog_files = [f for f in os.listdir(tub_path) if f.startswith('catalog_')]
+            catalog_files = [
+                f for f in os.listdir(tub_path)
+                if f.startswith('catalog_') and f.endswith('.catalog')
+            ]
             catalog_files.sort()
             
             for catalog_file in catalog_files:
                 with open(os.path.join(tub_path, catalog_file), 'r') as f:
                     for line in f:
                         record = json.loads(line)
+                        if 'cam/image_array' not in record:
+                            continue
+                        if any(k not in record for k in self.imu_keys):
+                            self.missing_imu_records += 1
                         # Store absolute path to image and the raw IMU/Control data
                         record['_tub_path'] = tub_path
                         self.records.append(record)
@@ -60,6 +72,8 @@ class TubDataset(Dataset):
 
         # 1. Load and Normalize Image
         img_path = os.path.join(tub_path, record['cam/image_array'])
+        if not os.path.exists(img_path):
+            img_path = os.path.join(tub_path, 'images', record['cam/image_array'])
         image = Image.open(img_path).convert('RGB')
         
         if self.transform:
@@ -81,10 +95,7 @@ class TubDataset(Dataset):
                 safe_idx = idx # Fallback to current if tub boundary crossed
             
             r = self.records[safe_idx]
-            raw_imu = [
-                r.get('imu/acl_x', 0), r.get('imu/acl_y', 0), r.get('imu/acl_z', 0),
-                r.get('imu/gyr_x', 0), r.get('imu/gyr_y', 0), r.get('imu/gyr_z', 0)
-            ]
+            raw_imu = [r.get(k, 0) for k in self.imu_keys]
             imu_seq.append(self.normalize_imu(raw_imu))
         
         imu_tensor = torch.tensor(np.array(imu_seq), dtype=torch.float32)

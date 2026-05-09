@@ -35,6 +35,9 @@ uv run --env-file .env python -W ignore::SyntaxWarning donkeydrone/drone_manage.
 # One-command thrust/hover test (starts stack, runs test, tears down)
 ./scripts/test_thrust.sh --airframe=65mm
 
+# Scripted no-human data collection + training smoke/test run
+./scripts/collect_train.sh --airframe=65mm --duration=30 --max-epochs=5 --model=models/scripted_autonomous.pth
+
 # Train CNN
 uv run python donkeydrone/torch_train.py --tubs=data/tub_NN_YY-MM-DD --model=models/pilot.pth
 

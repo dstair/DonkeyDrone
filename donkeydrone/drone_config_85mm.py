@@ -108,6 +108,7 @@ LOOP_DELAY_LOG_INTERVAL = 100  # log stats every N iterations
 DRONE_RECORD_POSITION = True
 DRONE_RECORD_ATTITUDE = True
 DRONE_RECORD_VELOCITY = True
+DRONE_RECORD_IMU = True
 
 # ---- Vehicle Loop ----
 DRIVE_LOOP_HZ = 30

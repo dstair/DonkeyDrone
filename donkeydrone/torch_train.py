@@ -36,7 +36,7 @@ def get_device():
     return torch.device('cpu')
 
 
-def train(cfg, tub_paths, model_path):
+def train(cfg, tub_paths, model_path, max_epochs_override=None):
     device = get_device()
     print(f"Device: {device}")
 
@@ -44,7 +44,7 @@ def train(cfg, tub_paths, model_path):
     image_w = getattr(cfg, 'IMAGE_W', 160)
     image_d = getattr(cfg, 'IMAGE_DEPTH', 3)
     batch_size = getattr(cfg, 'BATCH_SIZE', 128)
-    max_epochs = getattr(cfg, 'MAX_EPOCHS', 100)
+    max_epochs = max_epochs_override or getattr(cfg, 'MAX_EPOCHS', 100)
     lr = getattr(cfg, 'LEARNING_RATE', 0.001)
     patience = getattr(cfg, 'EARLY_STOP_PATIENCE', 5)
     train_split = getattr(cfg, 'TRAIN_TEST_SPLIT', 0.8)
@@ -62,10 +62,19 @@ def train(cfg, tub_paths, model_path):
     if len(dataset) == 0:
         print("ERROR: No samples found. Check --tubs path.")
         return
+    if dataset.missing_imu_records:
+        print(
+            "WARNING: "
+            f"{dataset.missing_imu_records}/{len(dataset)} samples are missing "
+            "imu/acl_* or imu/gyr_* fields; zeros will be used for those records."
+        )
 
     # Train/val split
     n_train = int(len(dataset) * train_split)
     n_val = len(dataset) - n_train
+    if n_train == 0 or n_val == 0:
+        print("ERROR: Need at least two samples for a train/val split.")
+        return
     train_ds, val_ds = random_split(dataset, [n_train, n_val])
     print(f"Train: {n_train}, Val: {n_val}")
 
@@ -146,6 +155,7 @@ def main():
     parser.add_argument('--tubs', required=True, help='Comma-separated tub directories')
     parser.add_argument('--model', required=True, help='Output .pth model path')
     parser.add_argument('--myconfig', default='drone_config_65mm.py', help='Config file')
+    parser.add_argument('--max-epochs', type=int, default=None, help='Override MAX_EPOCHS')
     args = parser.parse_args()
 
     import donkeycar as dk
@@ -155,7 +165,7 @@ def main():
     )
 
     tub_paths = [t.strip() for t in args.tubs.split(',')]
-    train(cfg, tub_paths, args.model)
+    train(cfg, tub_paths, args.model, max_epochs_override=args.max_epochs)
 
 
 if __name__ == '__main__':

@@ -189,6 +189,10 @@ def add_drone_sim(V, cfg):
         record_position=cfg.DRONE_RECORD_POSITION,
         record_attitude=cfg.DRONE_RECORD_ATTITUDE,
         record_velocity=cfg.DRONE_RECORD_VELOCITY,
+        record_imu=getattr(cfg, "DRONE_RECORD_IMU", False),
+        gz_world=getattr(cfg, "GZ_WORLD", None),
+        gz_model_name=getattr(cfg, "DRONE_GZ_MODEL_NAME", None),
+        gz_imu_topic=getattr(cfg, "DRONE_GZ_IMU_TOPIC", None),
     )
 
     inputs = ["steering", "throttle", "altitude", "user/arm"]
@@ -200,6 +204,15 @@ def add_drone_sim(V, cfg):
         outputs += ["imu/roll", "imu/pitch", "imu/yaw"]
     if cfg.DRONE_RECORD_VELOCITY:
         outputs += ["vel/vel_x", "vel/vel_y", "vel/vel_z"]
+    if getattr(cfg, "DRONE_RECORD_IMU", False):
+        outputs += [
+            "imu/acl_x",
+            "imu/acl_y",
+            "imu/acl_z",
+            "imu/gyr_x",
+            "imu/gyr_y",
+            "imu/gyr_z",
+        ]
 
     V.add(gym, inputs=inputs, outputs=outputs, threaded=True)
 
@@ -365,7 +378,10 @@ def drive(
         if model_path.endswith(".pth"):
             from torch_pilot import TorchPilot
 
-            kl = TorchPilot(input_shape=(cfg.IMAGE_DEPTH, cfg.IMAGE_H, cfg.IMAGE_W))
+            kl = TorchPilot(
+                input_shape=(cfg.IMAGE_DEPTH, cfg.IMAGE_H, cfg.IMAGE_W),
+                seq_len=getattr(cfg, "SEQUENCE_LENGTH", 3),
+            )
         else:
             kl = dk.utils.get_model_by_type(model_type, cfg)
 
@@ -435,6 +451,19 @@ def drive(
             inputs = ["cam/image_array", "behavior/one_hot_state_array"]
         else:
             inputs = ["cam/image_array"]
+            if (
+                model_path.endswith(".pth")
+                and getattr(cfg, "USE_DRONE_SIM", False)
+                and getattr(cfg, "DRONE_RECORD_IMU", False)
+            ):
+                inputs += [
+                    "imu/acl_x",
+                    "imu/acl_y",
+                    "imu/acl_z",
+                    "imu/gyr_x",
+                    "imu/gyr_y",
+                    "imu/gyr_z",
+                ]
 
         # Model outputs
         outputs = ["pilot/angle", "pilot/throttle", "pilot/altitude"]
@@ -523,6 +552,16 @@ def drive(
         if cfg.DRONE_RECORD_VELOCITY:
             inputs += ["vel/vel_x", "vel/vel_y", "vel/vel_z"]
             types += ["float", "float", "float"]
+        if getattr(cfg, "DRONE_RECORD_IMU", False):
+            inputs += [
+                "imu/acl_x",
+                "imu/acl_y",
+                "imu/acl_z",
+                "imu/gyr_x",
+                "imu/gyr_y",
+                "imu/gyr_z",
+            ]
+            types += ["float", "float", "float", "float", "float", "float"]
 
     if cfg.HAVE_IMU or (cfg.CAMERA_TYPE == "D435" and cfg.REALSENSE_D435_IMU):
         inputs += [

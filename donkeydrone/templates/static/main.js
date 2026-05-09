@@ -405,8 +405,15 @@ var driveHandler = new function() {
 
 
 
+    // Mode 2 quadcopter stick layout (Xbox/PS controllers via HTML5 Gamepad API):
+    //   left stick X  (axes[0]) → yaw      (steering)
+    //   left stick Y  (axes[1]) → altitude (up = climb)
+    //   right stick Y (axes[3]) → pitch    (forward = throttle)
+    //   A button (buttons[0])   → brake (zero controls + brakeOn)
+    //   Y button (buttons[3])   → cycle drive mode (rising edge)
+    var prevYButton = false;
     function gamePadLoop() {
-      setTimeout(gamePadLoop,100);
+      setTimeout(gamePadLoop, 100);
 
       if (state.controlMode != "gamepad") {
         return;
@@ -414,38 +421,46 @@ var driveHandler = new function() {
 
       var gamepads = navigator.getGamepads();
 
-      for (var i = 0; i < gamepads.length; ++i)
-        {
-          var pad = gamepads[i];
-          // some pads are NULL I think.. some aren't.. use one that isn't null
-          if (pad && pad.timestamp!=0)
-          {
+      for (var i = 0; i < gamepads.length; ++i) {
+        var pad = gamepads[i];
+        // Some slots are null until a button is pressed; timestamp==0 means
+        // the slot has never reported input.
+        if (!pad || pad.timestamp == 0) continue;
 
-            var joystickX = applyDeadzone(pad.axes[2], 0.05);
+        var yaw   = applyDeadzone(pad.axes[0], 0.10);
+        var alt   = applyDeadzone(-pad.axes[1], 0.10);
+        var pitch = applyDeadzone(-pad.axes[3], 0.10);
 
-            var joystickY = applyDeadzone(pad.axes[1], 0.15);
+        var aPressed = pad.buttons[0] && pad.buttons[0].pressed;
+        var yPressed = pad.buttons[3] && pad.buttons[3].pressed;
 
-            state.tele.user.angle = joystickX;
-            state.tele.user.throttle = limitedThrottle((joystickY * -1));
+        if (aPressed) {
+          state.tele.user.angle = 0;
+          state.tele.user.throttle = 0;
+          state.tele.user.altitude = 0;
+          state.brakeOn = true;
+          state.recording = false;
+        } else {
+          state.tele.user.angle = yaw;
+          state.tele.user.throttle = limitedThrottle(pitch);
+          state.tele.user.altitude = Math.max(-1, Math.min(1, alt));
 
-            if (state.tele.user.throttle == 0 && state.tele.user.throttle == 0) {
-              state.brakeOn = true;
-            } else {
-              state.brakeOn = false;
-            }
-
-            if (state.tele.user.throttle != 0) {
-              state.recording = true;
-            } else {
-              state.recording = false;
-            }
-
-            postDrive()
-
-          }
-            // todo; simple demo of displaying pad.axes and pad.buttons
+          var anyInput = (yaw != 0 || pitch != 0 || alt != 0);
+          state.brakeOn = !anyInput;
+          state.recording = anyInput;
         }
+
+        // Y button cycles drive mode on rising edge (debounce against the
+        // 100ms loop holding the button down across many ticks).
+        if (yPressed && !prevYButton) {
+          toggleDriveMode();
+        }
+        prevYButton = yPressed;
+
+        postDrive();
+        break;  // only consume the first connected pad
       }
+    }
 
 
     // Send control updates to the server every .1 seconds.

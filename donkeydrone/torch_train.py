@@ -20,61 +20,13 @@ import json
 import os
 import time
 
-import numpy as np
-from PIL import Image
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
+from torchvision import transforms
 
+from dataset import TubDataset
 from torch_model import LinearModel
-
-
-class TubDataset(Dataset):
-    """Reads DonkeyCar tub v2 format: catalog JSON lines + JPEG images."""
-
-    def __init__(self, tub_paths, image_h, image_w):
-        self.records = []
-        self.image_h = image_h
-        self.image_w = image_w
-
-        if isinstance(tub_paths, str):
-            tub_paths = [tub_paths]
-
-        for tub_path in tub_paths:
-            catalog_files = sorted(
-                f for f in os.listdir(tub_path)
-                if f.endswith('.catalog') and not f.endswith('_manifest')
-            )
-            images_dir = os.path.join(tub_path, 'images')
-            for cat_file in catalog_files:
-                with open(os.path.join(tub_path, cat_file)) as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        rec = json.loads(line)
-                        img_path = os.path.join(images_dir, rec['cam/image_array'])
-                        if os.path.exists(img_path):
-                            self.records.append({
-                                'image_path': img_path,
-                                'angle': rec['user/angle'],
-                                'throttle': rec['user/throttle'],
-                                'altitude': rec.get('user/altitude', 0.0),
-                            })
-
-    def __len__(self):
-        return len(self.records)
-
-    def __getitem__(self, idx):
-        rec = self.records[idx]
-        img = Image.open(rec['image_path']).convert('RGB')
-        img = img.resize((self.image_w, self.image_h), Image.BILINEAR)
-        # HWC uint8 → CHW float32 [0, 1]
-        arr = np.array(img, dtype=np.float32) / 255.0
-        tensor = torch.from_numpy(arr.transpose(2, 0, 1))
-        label = torch.tensor([rec['angle'], rec['throttle'], rec['altitude']], dtype=torch.float32)
-        return tensor, label
-
 
 def get_device():
     if torch.backends.mps.is_available():
@@ -96,9 +48,16 @@ def train(cfg, tub_paths, model_path):
     lr = getattr(cfg, 'LEARNING_RATE', 0.001)
     patience = getattr(cfg, 'EARLY_STOP_PATIENCE', 5)
     train_split = getattr(cfg, 'TRAIN_TEST_SPLIT', 0.8)
+    seq_len = getattr(cfg, 'SEQUENCE_LENGTH', 3)
 
-    # Load dataset
-    dataset = TubDataset(tub_paths, image_h, image_w)
+    # Define image transformations to match config resolution
+    img_transform = transforms.Compose([
+        transforms.Resize((image_h, image_w)),
+        transforms.ToTensor(), # handles HWC -> CHW and [0, 1] scaling
+    ])
+
+    # Load dataset using the multi-modal TubDataset
+    dataset = TubDataset(tub_paths, seq_len=seq_len, transform=img_transform)
     print(f"Total samples: {len(dataset)}")
     if len(dataset) == 0:
         print("ERROR: No samples found. Check --tubs path.")
@@ -117,7 +76,10 @@ def train(cfg, tub_paths, model_path):
                             num_workers=0, pin_memory=pin)
 
     # Model
-    model = LinearModel(input_shape=(image_d, image_h, image_w)).to(device)
+    model = LinearModel(
+        input_shape=(image_d, image_h, image_w), 
+        imu_shape=(seq_len, 6)
+    ).to(device)
     if getattr(cfg, 'PRINT_MODEL_SUMMARY', True):
         total_params = sum(p.numel() for p in model.parameters())
         print(f"Model parameters: {total_params:,}")
@@ -137,10 +99,10 @@ def train(cfg, tub_paths, model_path):
         # Train
         model.train()
         train_loss = 0.0
-        for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
+        for images, imus, labels in train_loader:
+            images, imus, labels = images.to(device), imus.to(device), labels.to(device)
             optimizer.zero_grad()
-            outputs = model(images)
+            outputs = model(images, imus)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
@@ -151,9 +113,9 @@ def train(cfg, tub_paths, model_path):
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for images, labels in val_loader:
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
+            for images, imus, labels in val_loader:
+                images, imus, labels = images.to(device), imus.to(device), labels.to(device)
+                outputs = model(images, imus)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item() * images.size(0)
         val_loss /= n_val

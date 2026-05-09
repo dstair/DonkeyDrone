@@ -7,12 +7,13 @@ DonkeyGymEnv. The DonkeyCar pipeline (web controller, CNN model, training,
 recording) is reused unchanged.
 
 Usage:
-    drone_manage.py (drive) [--model=<model>] [--js] [--type=(linear|categorical)] [--camera=(single|stereo)] [--meta=<key:value> ...] [--myconfig=<filename>]
+    drone_manage.py (drive) [--model=<model>] [--js] [--xbox] [--type=(linear|categorical)] [--camera=(single|stereo)] [--meta=<key:value> ...] [--myconfig=<filename>]
     drone_manage.py (train) [--tubs=tubs] (--model=<model>) [--type=(linear|inferred|tensorrt_linear|tflite_linear)]
 
 Options:
     -h --help               Show this screen.
     --js                    Use physical joystick.
+    --xbox                  Use Xbox controller (pygame, macOS-friendly).
     --meta=<key:value>      Key/Value strings describing a piece of meta data about this drive. Option may be used more than once.
     --myconfig=filename     Specify myconfig file to use.
                             [default: drone_config_65mm.py]
@@ -190,7 +191,7 @@ def add_drone_sim(V, cfg):
         record_velocity=cfg.DRONE_RECORD_VELOCITY,
     )
 
-    inputs = ["steering", "throttle", "altitude"]
+    inputs = ["steering", "throttle", "altitude", "user/arm"]
     outputs = ["cam/image_array", "rc/pitch", "rc/yaw", "rc/throttle"]
 
     if cfg.DRONE_RECORD_POSITION:
@@ -207,6 +208,7 @@ def drive(
     cfg,
     model_path=None,
     use_joystick=False,
+    use_xbox=False,
     model_type=None,
     camera_type="single",
     meta=[],
@@ -282,7 +284,7 @@ def drive(
     has_input_controller = (
         hasattr(cfg, "CONTROLLER_TYPE") and cfg.CONTROLLER_TYPE != "mock"
     )
-    ctr = add_user_controller(V, cfg, use_joystick)
+    ctr = add_user_controller(V, cfg, use_joystick, use_xbox=use_xbox)
 
     #
     # convert 'user/steering' to 'user/angle' for backward compatibility
@@ -803,7 +805,7 @@ def add_camera(V, cfg, camera_type):
         V.add(cam, inputs=inputs, outputs=outputs, threaded=threaded)
 
 
-def add_user_controller(V, cfg, use_joystick, input_image="ui/image_array"):
+def add_user_controller(V, cfg, use_joystick, use_xbox=False, input_image="ui/image_array"):
     ctr = LocalWebController(port=cfg.WEB_CONTROL_PORT, mode=cfg.WEB_INIT_MODE)
     V.add(
         ctr,
@@ -826,6 +828,30 @@ def add_user_controller(V, cfg, use_joystick, input_image="ui/image_array"):
         ],
         threaded=True,
     )
+
+    if use_xbox:
+        from xbox_controller import XboxDroneController
+
+        xbox_ctr = XboxDroneController(
+            deadzone=getattr(cfg, "XBOX_DEADZONE", 0.08),
+            steering_scale=getattr(cfg, "XBOX_STEERING_SCALE", 1.0),
+            throttle_scale=getattr(cfg, "XBOX_THROTTLE_SCALE", 1.0),
+            altitude_scale=getattr(cfg, "XBOX_ALTITUDE_SCALE", 1.0),
+            arm_threshold=getattr(cfg, "XBOX_ARM_THRESHOLD", 0.5),
+        )
+        V.add(
+            xbox_ctr,
+            outputs=[
+                "user/steering",
+                "user/throttle",
+                "user/altitude",
+                "user/mode",
+                "recording",
+                "user/arm",
+            ],
+        )
+        # Xbox part is the controller of record for trigger callbacks etc.
+        ctr = xbox_ctr
 
     if use_joystick or cfg.USE_JOYSTICK_AS_DEFAULT:
         if cfg.CONTROLLER_TYPE == "pigpio_rc":
@@ -958,6 +984,7 @@ if __name__ == "__main__":
             cfg,
             model_path=args["--model"],
             use_joystick=args["--js"],
+            use_xbox=args["--xbox"],
             model_type=model_type,
             camera_type=camera_type,
             meta=args["--meta"],

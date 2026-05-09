@@ -12,6 +12,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 #   Default is 65mm (BetaFPV Air65). Use 85mm for the FlyWoo Flylens profile.
 SKIP_MANAGE=0
 AIRFRAME="65mm"
+USE_XBOX=0
 MANAGE_ARGS=()
 for arg in "$@"; do
     case "$arg" in
@@ -20,6 +21,10 @@ for arg in "$@"; do
             ;;
         --airframe=*)
             AIRFRAME="${arg#--airframe=}"
+            ;;
+        --xbox)
+            USE_XBOX=1
+            MANAGE_ARGS+=("$arg")
             ;;
         *)
             MANAGE_ARGS+=("$arg")
@@ -435,6 +440,26 @@ if [ "$SKIP_MANAGE" = "1" ]; then
     tail -f /dev/null &
     wait $!
 else
+    # Launch the Xbox controller bridge (.app bundle) if --xbox was passed.
+    # GameController.framework is the only macOS path that sees an Xbox
+    # controller (Apple's XboxGamepad dext blocks pygame/SDL/hidapi), and it
+    # only works from a real .app bundle. The bridge sends 18-byte frames at
+    # 60Hz to /tmp/donkeydrone_xbox.sock; XboxDroneController binds it.
+    if [ "$USE_XBOX" = "1" ]; then
+        XBOX_APP="$PROJECT_DIR/xbox_bridge/build/XboxBridge.app"
+        if [ ! -d "$XBOX_APP" ]; then
+            echo "ERROR: $XBOX_APP not found." >&2
+            echo "Build it with: bash $PROJECT_DIR/xbox_bridge/build.sh" >&2
+            exit 1
+        fi
+        # Kill any prior instance so it re-enumerates the controller cleanly.
+        pkill -f XboxBridge.app 2>/dev/null || true
+        rm -f /tmp/donkeydrone_xbox.sock
+        sleep 0.3
+        echo "Starting XboxBridge.app (controller → UDS @ /tmp/donkeydrone_xbox.sock)..."
+        open "$XBOX_APP"
+    fi
+
     echo "Starting drone_manage.py (--myconfig=$DRONE_CONFIG)..."
     uv run --env-file .env python -W ignore::SyntaxWarning \
         donkeydrone/drone_manage.py drive --myconfig="$DRONE_CONFIG" ${MANAGE_ARGS[@]+"${MANAGE_ARGS[@]}"}

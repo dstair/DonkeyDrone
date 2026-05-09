@@ -195,6 +195,9 @@ class DroneGymEnv:
         self.steering = 0.0
         self.throttle = 0.0
         self.altitude = 0.0  # altitude control input [-1, 1] → motor throttle
+        # Arm signal from user/arm. None = legacy auto-arm (always armed after
+        # boot disarm phase). True/False = explicit arm control (e.g. RT trigger).
+        self.user_arm = None
         self.last_pitch_pwm = 1500
         self.last_yaw_pwm = 1500
         self.last_throttle_pwm = 1000
@@ -400,8 +403,9 @@ class DroneGymEnv:
         # a small cap keeps the yaw-induced climb manageable.
         channels[3] = int(max(1000, min(2000, 1500 + steer * self.yaw_pwm_cap)))
 
-        # CH5 (AUX1): armed
-        channels[self.arm_channel] = 2000
+        # CH5 (AUX1): armed. user_arm=None preserves legacy "always armed
+        # after boot disarm phase" behavior; explicit False disarms.
+        channels[self.arm_channel] = 1000 if self.user_arm is False else 2000
 
         # CH6 (AUX2): 2000 = Angle (self-leveling), 1000 = Acro (rate mode)
         channels[self.mode_channel] = 2000 if self.angle_mode else 1000
@@ -642,13 +646,15 @@ class DroneGymEnv:
         except Exception as e:
             logger.error("BetaFlight loop error: %s", e)
 
-    def run_threaded(self, steering, throttle, altitude):
+    def run_threaded(self, steering, throttle, altitude, user_arm=None):
         """
         Called by the DonkeyCar Vehicle loop each frame.
 
         :param steering: normalized steering [-1, 1], mapped to yaw rate
         :param throttle: normalized throttle [-1, 1], mapped to forward pitch
         :param altitude: normalized altitude [-1, 1], mapped to motor throttle
+        :param user_arm: optional bool. None = legacy auto-arm; True/False =
+                         explicit arm switch (e.g. Xbox RT deadman).
         :return: camera image array + optional telemetry values
         """
         # Loop delay measurement
@@ -680,6 +686,7 @@ class DroneGymEnv:
         self.steering = float(steering)
         self.throttle = float(throttle)
         self.altitude = float(altitude)
+        self.user_arm = user_arm if isinstance(user_arm, bool) else None
 
         # Read camera frame
         if self.camera_source == "gz_transport":

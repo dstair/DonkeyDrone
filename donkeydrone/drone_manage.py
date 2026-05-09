@@ -143,6 +143,8 @@ from donkeycar.parts.explode import ExplodeDict
 from donkeycar.parts.transform import Lambda
 from donkeycar.parts.pipe import Pipe
 from donkeycar.utils import *
+from drone_env import build_drone_env
+from tub_schema import IMU_KEYS, drone_tub_schema
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -159,41 +161,7 @@ def add_drone_sim(V, cfg):
     The memory key names (steering, throttle, cam/image_array) are kept
     identical to the car version so all other parts work unchanged.
     """
-    from drone_gym import DroneGymEnv, _GZ_CAMERA_TOPIC_DEFAULT
-
-    gym = DroneGymEnv(
-        rc_host=getattr(cfg, "BETAFLIGHT_RC_HOST", "127.0.0.1"),
-        rc_port=getattr(cfg, "BETAFLIGHT_RC_PORT", 9004),
-        camera_source=getattr(cfg, "DRONE_CAMERA_SOURCE", "gz_transport"),
-        gz_camera_topic=getattr(cfg, "DRONE_GZ_CAMERA_TOPIC", _GZ_CAMERA_TOPIC_DEFAULT),
-        rtsp_url=getattr(cfg, "DRONE_RTSP_URL", "rtsp://127.0.0.1:8554/live"),
-        max_pitch_angle=getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0),
-        max_yaw_rate=getattr(cfg, "DRONE_MAX_YAW_RATE", 90.0),
-        hover_throttle=getattr(cfg, "DRONE_HOVER_THROTTLE", 1500),
-        throttle_range=getattr(cfg, "DRONE_THROTTLE_RANGE", 300),
-        throttle_scale=getattr(cfg, "DRONE_THROTTLE_SCALE", 1.0),
-        arm_channel=getattr(cfg, "BETAFLIGHT_ARM_CHANNEL", 4),
-        mode_channel=getattr(cfg, "BETAFLIGHT_MODE_CHANNEL", 5),
-        image_w=cfg.IMAGE_W,
-        image_h=cfg.IMAGE_H,
-        simulated_delay_ms=getattr(cfg, "SIMULATED_DELAY_MS", 0),
-        measure_loop_delay=getattr(cfg, "MEASURE_LOOP_DELAY", False),
-        loop_delay_log_interval=getattr(cfg, "LOOP_DELAY_LOG_INTERVAL", 100),
-        input_sensitivity=getattr(cfg, "DRONE_INPUT_SENSITIVITY", 1.0),
-        yaw_pwm_cap=getattr(cfg, "DRONE_YAW_PWM_CAP", 30),
-        yaw_throttle_feedforward=getattr(cfg, "DRONE_YAW_THROTTLE_FEEDFORWARD", 0.0),
-        altitude_hold_k=getattr(cfg, "DRONE_ALTITUDE_HOLD_K", 30.0),
-        altitude_hold_deadband=getattr(cfg, "DRONE_ALTITUDE_HOLD_DEADBAND", 0.05),
-        altitude_hold_enabled=getattr(cfg, "DRONE_ALTITUDE_HOLD_ENABLED", True),
-        angle_mode=getattr(cfg, "DRONE_ANGLE_MODE", True),
-        record_position=cfg.DRONE_RECORD_POSITION,
-        record_attitude=cfg.DRONE_RECORD_ATTITUDE,
-        record_velocity=cfg.DRONE_RECORD_VELOCITY,
-        record_imu=getattr(cfg, "DRONE_RECORD_IMU", False),
-        gz_world=getattr(cfg, "GZ_WORLD", None),
-        gz_model_name=getattr(cfg, "DRONE_GZ_MODEL_NAME", None),
-        gz_imu_topic=getattr(cfg, "DRONE_GZ_IMU_TOPIC", None),
-    )
+    gym = build_drone_env(cfg)
 
     inputs = ["steering", "throttle", "altitude", "user/arm"]
     outputs = ["cam/image_array", "rc/pitch", "rc/yaw", "rc/throttle"]
@@ -205,14 +173,7 @@ def add_drone_sim(V, cfg):
     if cfg.DRONE_RECORD_VELOCITY:
         outputs += ["vel/vel_x", "vel/vel_y", "vel/vel_z"]
     if getattr(cfg, "DRONE_RECORD_IMU", False):
-        outputs += [
-            "imu/acl_x",
-            "imu/acl_y",
-            "imu/acl_z",
-            "imu/gyr_x",
-            "imu/gyr_y",
-            "imu/gyr_z",
-        ]
+        outputs += IMU_KEYS
 
     V.add(gym, inputs=inputs, outputs=outputs, threaded=True)
 
@@ -456,14 +417,7 @@ def drive(
                 and getattr(cfg, "USE_DRONE_SIM", False)
                 and getattr(cfg, "DRONE_RECORD_IMU", False)
             ):
-                inputs += [
-                    "imu/acl_x",
-                    "imu/acl_y",
-                    "imu/acl_z",
-                    "imu/gyr_x",
-                    "imu/gyr_y",
-                    "imu/gyr_z",
-                ]
+                inputs += IMU_KEYS
 
         # Model outputs
         outputs = ["pilot/angle", "pilot/throttle", "pilot/altitude"]
@@ -532,47 +486,20 @@ def drive(
     #
     # Tub data recording
     #
-    inputs = [
-        "cam/image_array",
-        "user/angle",
-        "user/throttle",
-        "user/altitude",
-        "user/mode",
-    ]
-    types = ["image_array", "float", "float", "float", "str"]
+    inputs, types = drone_tub_schema()
 
     # Add drone telemetry to tub schema
     if getattr(cfg, "USE_DRONE_SIM", False):
-        if cfg.DRONE_RECORD_POSITION:
-            inputs += ["pos/pos_x", "pos/pos_y", "pos/pos_z"]
-            types += ["float", "float", "float"]
-        if cfg.DRONE_RECORD_ATTITUDE:
-            inputs += ["imu/roll", "imu/pitch", "imu/yaw"]
-            types += ["float", "float", "float"]
-        if cfg.DRONE_RECORD_VELOCITY:
-            inputs += ["vel/vel_x", "vel/vel_y", "vel/vel_z"]
-            types += ["float", "float", "float"]
-        if getattr(cfg, "DRONE_RECORD_IMU", False):
-            inputs += [
-                "imu/acl_x",
-                "imu/acl_y",
-                "imu/acl_z",
-                "imu/gyr_x",
-                "imu/gyr_y",
-                "imu/gyr_z",
-            ]
-            types += ["float", "float", "float", "float", "float", "float"]
+        inputs, types = drone_tub_schema(
+            record_position=cfg.DRONE_RECORD_POSITION,
+            record_attitude=cfg.DRONE_RECORD_ATTITUDE,
+            record_velocity=cfg.DRONE_RECORD_VELOCITY,
+            record_imu=getattr(cfg, "DRONE_RECORD_IMU", False),
+        )
 
     if cfg.HAVE_IMU or (cfg.CAMERA_TYPE == "D435" and cfg.REALSENSE_D435_IMU):
-        inputs += [
-            "imu/acl_x",
-            "imu/acl_y",
-            "imu/acl_z",
-            "imu/gyr_x",
-            "imu/gyr_y",
-            "imu/gyr_z",
-        ]
-        types += ["float", "float", "float", "float", "float", "float"]
+        inputs += IMU_KEYS
+        types += ["float"] * len(IMU_KEYS)
 
     if cfg.RECORD_DURING_AI:
         inputs += ["pilot/angle", "pilot/throttle", "pilot/altitude"]
@@ -959,14 +886,7 @@ def add_imu(V, cfg):
         )
         V.add(
             imu,
-            outputs=[
-                "imu/acl_x",
-                "imu/acl_y",
-                "imu/acl_z",
-                "imu/gyr_x",
-                "imu/gyr_y",
-                "imu/gyr_z",
-            ],
+            outputs=IMU_KEYS,
             threaded=True,
         )
 

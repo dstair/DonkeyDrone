@@ -18,7 +18,8 @@ import numpy as np
 from donkeycar.parts.datastore import TubHandler
 from donkeycar.parts.tub_v2 import TubWriter
 
-from drone_gym import DroneGymEnv, _GZ_CAMERA_TOPIC_DEFAULT
+from drone_env import build_drone_env
+from tub_schema import DRONE_TUB_INPUTS, DRONE_TUB_TYPES
 
 
 def _flight_command(t):
@@ -83,44 +84,6 @@ def _wait_for_ready(env, timeout_s):
     raise RuntimeError(f"Timed out waiting for collector readiness: {last_status}")
 
 
-def _build_env(cfg, airframe):
-    world = os.environ.get("GZ_WORLD", f"drone_course_{airframe}")
-    model_name = f"betaloop_drone_cam_{airframe}"
-    return DroneGymEnv(
-        rc_host=getattr(cfg, "BETAFLIGHT_RC_HOST", "127.0.0.1"),
-        rc_port=getattr(cfg, "BETAFLIGHT_RC_PORT", 9004),
-        camera_source=getattr(cfg, "DRONE_CAMERA_SOURCE", "gz_transport"),
-        gz_camera_topic=getattr(cfg, "DRONE_GZ_CAMERA_TOPIC", _GZ_CAMERA_TOPIC_DEFAULT),
-        rtsp_url=getattr(cfg, "DRONE_RTSP_URL", "rtsp://127.0.0.1:8554/live"),
-        max_pitch_angle=getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0),
-        max_yaw_rate=getattr(cfg, "DRONE_MAX_YAW_RATE", 90.0),
-        hover_throttle=getattr(cfg, "DRONE_HOVER_THROTTLE", 1500),
-        throttle_range=getattr(cfg, "DRONE_THROTTLE_RANGE", 300),
-        throttle_scale=getattr(cfg, "DRONE_THROTTLE_SCALE", 1.0),
-        arm_channel=getattr(cfg, "BETAFLIGHT_ARM_CHANNEL", 4),
-        mode_channel=getattr(cfg, "BETAFLIGHT_MODE_CHANNEL", 5),
-        image_w=cfg.IMAGE_W,
-        image_h=cfg.IMAGE_H,
-        simulated_delay_ms=getattr(cfg, "SIMULATED_DELAY_MS", 0),
-        measure_loop_delay=getattr(cfg, "MEASURE_LOOP_DELAY", False),
-        loop_delay_log_interval=getattr(cfg, "LOOP_DELAY_LOG_INTERVAL", 100),
-        input_sensitivity=getattr(cfg, "DRONE_INPUT_SENSITIVITY", 1.0),
-        yaw_pwm_cap=getattr(cfg, "DRONE_YAW_PWM_CAP", 30),
-        yaw_throttle_feedforward=getattr(cfg, "DRONE_YAW_THROTTLE_FEEDFORWARD", 0.0),
-        altitude_hold_k=getattr(cfg, "DRONE_ALTITUDE_HOLD_K", 30.0),
-        altitude_hold_deadband=getattr(cfg, "DRONE_ALTITUDE_HOLD_DEADBAND", 0.05),
-        altitude_hold_enabled=getattr(cfg, "DRONE_ALTITUDE_HOLD_ENABLED", True),
-        angle_mode=getattr(cfg, "DRONE_ANGLE_MODE", True),
-        record_position=True,
-        record_attitude=True,
-        record_velocity=True,
-        record_imu=True,
-        gz_world=world,
-        gz_model_name=model_name,
-        gz_imu_topic=getattr(cfg, "DRONE_GZ_IMU_TOPIC", None),
-    )
-
-
 def collect(cfg, args):
     _wait_for_tcp(
         getattr(cfg, "BETAFLIGHT_RC_HOST", "127.0.0.1"),
@@ -129,54 +92,19 @@ def collect(cfg, args):
         "BetaFlight MSP",
     )
 
-    env = _build_env(cfg, args.airframe)
+    env = build_drone_env(
+        cfg,
+        airframe=args.airframe,
+        record_position=True,
+        record_attitude=True,
+        record_velocity=True,
+        record_imu=True,
+    )
     update_thread = threading.Thread(target=env.update, daemon=True)
     update_thread.start()
 
-    inputs = [
-        "cam/image_array",
-        "user/angle",
-        "user/throttle",
-        "user/altitude",
-        "user/mode",
-        "pos/pos_x",
-        "pos/pos_y",
-        "pos/pos_z",
-        "imu/roll",
-        "imu/pitch",
-        "imu/yaw",
-        "vel/vel_x",
-        "vel/vel_y",
-        "vel/vel_z",
-        "imu/acl_x",
-        "imu/acl_y",
-        "imu/acl_z",
-        "imu/gyr_x",
-        "imu/gyr_y",
-        "imu/gyr_z",
-    ]
-    types = [
-        "image_array",
-        "float",
-        "float",
-        "float",
-        "str",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-        "float",
-    ]
+    inputs = DRONE_TUB_INPUTS
+    types = DRONE_TUB_TYPES
     tub_writer = None
     period = 1.0 / float(args.rate_hz)
     records = 0

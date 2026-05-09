@@ -324,3 +324,56 @@ Two airframes are maintained in parallel for A/B flight comparison: **65mm BetaF
 Known quirk: on Air65, yaw input causes significantly more climb than on the 85mm (mass is 4× smaller, mixer ω² asymmetry produces the same excess thrust → 4× more acceleration). `DRONE_YAW_PWM_CAP = 30` in both configs is the pending tuning knob.
 
 Full stack working end-to-end: `start.sh` → Gazebo + BetaFlight SITL + drone_manage.py all launch, RC packets flow at 50Hz, camera frames arrive via shared memory, Web UI at :8887.
+
+## Current Handoff (2026-05-09)
+
+Goal: collect new-format drone data with no human intervention, then verify training on that new tub. The new model expects image + 6-axis IMU sequence inputs:
+- `imu/acl_x`, `imu/acl_y`, `imu/acl_z`
+- `imu/gyr_x`, `imu/gyr_y`, `imu/gyr_z`
+
+Recent changes in progress:
+- `donkeydrone/drone_gym.py` now subscribes to Gazebo pose + IMU telemetry and can output raw 6-axis IMU fields alongside position, attitude, and velocity.
+- `DRONE_RECORD_IMU = True` was added to both `drone_config_65mm.py` and `drone_config_85mm.py`.
+- `donkeydrone/drone_manage.py` records the new IMU fields into manual/autopilot tubs when `DRONE_RECORD_IMU` is enabled.
+- `donkeydrone/torch_pilot.py` was updated so `.pth` inference passes an IMU history tensor to `LinearModel`; the new model no longer works with image-only inference.
+- `donkeydrone/dataset.py` was updated for new-format tubs:
+  - filters only `*.catalog` files, not `catalog_*.catalog_manifest`
+  - skips non-sample catalog rows missing `cam/image_array`
+  - resolves images from both tub root and DonkeyCar v2 `images/`
+  - warns/counts records missing the six required IMU keys
+- `donkeydrone/gz_camera_worker.py` unregisters the attached shared memory from the child process resource tracker; parent owns unlinking.
+- `donkeydrone/autonomous_collect.py` is a headless scripted collector that directly writes a tub after confirming:
+  - BetaFlight MSP is reachable on TCP 5761
+  - camera frames are nonblank
+  - RC/control loop has reached hover throttle after arming
+  - Gazebo IMU telemetry is nonzero
+- `scripts/collect_train.sh` starts `start.sh --no-manage`, runs `autonomous_collect.py`, then trains on the newly created tub.
+
+Validated test run:
+```bash
+GZ_HEADLESS=1 ./scripts/start.sh --no-manage --airframe=65mm
+uv run --env-file .env python donkeydrone/autonomous_collect.py \
+  --airframe=65mm --duration=3 --warmup=1 --rate-hz=5 --ready-timeout=30
+uv run --env-file .env python donkeydrone/torch_train.py \
+  --tubs=data/tub_210_26-05-09 --model=/private/tmp/tub_210_test.pth --max-epochs=1
+bash ./scripts/stop_all.sh
+```
+
+Results:
+- `data/tub_210_26-05-09` was created by `autonomous_collect.py`
+- 15 records were written
+- catalog rows include nonzero `imu/acl_*` and `imu/gyr_*`
+- one-epoch training on that tub completed successfully on MPS
+- test model saved to `/private/tmp/tub_210_test.pth`
+
+Known notes:
+- `data/tub_209_26-05-09` was also created during testing and contains 50 valid records, but the first collector run exited nonzero due to a shared-memory unlink race that was then fixed in `DroneGymEnv.shutdown()`.
+- `data/tub_208_26-05-09` was created during manual flight but has zero catalog records because recording stayed false.
+- A cosmetic Python `resource_tracker` shared-memory warning may still appear on collector shutdown even when the process exits `0`.
+- In manual web-controller runs, `AUTO_RECORD_ON_THROTTLE` may not record if only altitude/motor throttle changes and `user/throttle` stays zero; the scripted collector bypasses this by writing records directly.
+
+Suggested next refactor:
+1. Create a shared schema module, e.g. `donkeydrone/tub_schema.py`, with `DRONE_TUB_INPUTS`, `DRONE_TUB_TYPES`, and `IMU_KEYS`; use it from `drone_manage.py`, `autonomous_collect.py`, and `dataset.py`.
+2. Extract Gazebo telemetry helpers (`_SimTelemetry`, `_PoseTracker`, quaternion conversion) from `drone_gym.py` into a focused module, e.g. `donkeydrone/gz_telemetry.py`.
+3. Extract shared `build_drone_env(cfg, airframe=...)` construction so `drone_manage.py` and `autonomous_collect.py` do not duplicate the long `DroneGymEnv(...)` argument list.
+4. Consider making autonomous flight profiles pluggable (`--profile=figure-eight`, `--profile=hover-sweep`, etc.) once the code is cleaner.

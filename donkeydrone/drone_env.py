@@ -1,0 +1,72 @@
+"""Shared DroneGymEnv construction."""
+
+import os
+
+from drone_gym import DroneGymEnv, _GZ_CAMERA_TOPIC_DEFAULT
+
+
+def build_drone_env(
+    cfg,
+    *,
+    airframe=None,
+    record_position=None,
+    record_attitude=None,
+    record_velocity=None,
+    record_imu=None,
+    gz_world=None,
+    gz_model_name=None,
+):
+    """Build DroneGymEnv from DonkeyDrone config with optional overrides."""
+    if airframe is not None:
+        gz_world = gz_world or os.environ.get("GZ_WORLD", f"drone_course_{airframe}")
+        gz_model_name = gz_model_name or f"betaloop_drone_cam_{airframe}"
+    return DroneGymEnv(
+        rc_host=getattr(cfg, "BETAFLIGHT_RC_HOST", "127.0.0.1"),
+        rc_port=getattr(cfg, "BETAFLIGHT_RC_PORT", 9004),
+        camera_source=getattr(cfg, "DRONE_CAMERA_SOURCE", "gz_transport"),
+        gz_camera_topic=getattr(cfg, "DRONE_GZ_CAMERA_TOPIC", _GZ_CAMERA_TOPIC_DEFAULT),
+        rtsp_url=getattr(cfg, "DRONE_RTSP_URL", "rtsp://127.0.0.1:8554/live"),
+        max_pitch_angle=getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0),
+        max_yaw_rate=getattr(cfg, "DRONE_MAX_YAW_RATE", 90.0),
+        hover_throttle=getattr(cfg, "DRONE_HOVER_THROTTLE", 1500),
+        throttle_range=getattr(cfg, "DRONE_THROTTLE_RANGE", 300),
+        throttle_scale=getattr(cfg, "DRONE_THROTTLE_SCALE", 1.0),
+        arm_channel=getattr(cfg, "BETAFLIGHT_ARM_CHANNEL", 4),
+        mode_channel=getattr(cfg, "BETAFLIGHT_MODE_CHANNEL", 5),
+        image_w=cfg.IMAGE_W,
+        image_h=cfg.IMAGE_H,
+        simulated_delay_ms=getattr(cfg, "SIMULATED_DELAY_MS", 0),
+        measure_loop_delay=getattr(cfg, "MEASURE_LOOP_DELAY", False),
+        loop_delay_log_interval=getattr(cfg, "LOOP_DELAY_LOG_INTERVAL", 100),
+        input_sensitivity=getattr(cfg, "DRONE_INPUT_SENSITIVITY", 1.0),
+        yaw_pwm_cap=getattr(cfg, "DRONE_YAW_PWM_CAP", 30),
+        yaw_throttle_feedforward=getattr(cfg, "DRONE_YAW_THROTTLE_FEEDFORWARD", 0.0),
+        altitude_hold_k=getattr(cfg, "DRONE_ALTITUDE_HOLD_K", 30.0),
+        altitude_hold_deadband=getattr(cfg, "DRONE_ALTITUDE_HOLD_DEADBAND", 0.05),
+        altitude_hold_enabled=getattr(cfg, "DRONE_ALTITUDE_HOLD_ENABLED", True),
+        angle_mode=getattr(cfg, "DRONE_ANGLE_MODE", True),
+        record_position=(
+            getattr(cfg, "DRONE_RECORD_POSITION", False)
+            if record_position is None
+            else record_position
+        ),
+        record_attitude=(
+            getattr(cfg, "DRONE_RECORD_ATTITUDE", False)
+            if record_attitude is None
+            else record_attitude
+        ),
+        record_velocity=(
+            getattr(cfg, "DRONE_RECORD_VELOCITY", False)
+            if record_velocity is None
+            else record_velocity
+        ),
+        record_imu=(
+            getattr(cfg, "DRONE_RECORD_IMU", False) if record_imu is None else record_imu
+        ),
+        gz_world=gz_world if gz_world is not None else getattr(cfg, "GZ_WORLD", None),
+        gz_model_name=(
+            gz_model_name if gz_model_name is not None
+            else getattr(cfg, "DRONE_GZ_MODEL_NAME", None)
+        ),
+        gz_imu_topic=getattr(cfg, "DRONE_GZ_IMU_TOPIC", None),
+    )

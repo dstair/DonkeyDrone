@@ -5,6 +5,8 @@ from PIL import Image
 import os
 import json
 
+from tub_schema import IMU_KEYS
+
 class TubDataset(Dataset):
     def __init__(self, tub_paths, seq_len=3, transform=None):
         """
@@ -17,10 +19,7 @@ class TubDataset(Dataset):
         self.seq_len = seq_len
         self.transform = transform
         self.records = []
-        self.imu_keys = [
-            'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
-            'imu/gyr_x', 'imu/gyr_y', 'imu/gyr_z'
-        ]
+        self.imu_keys = IMU_KEYS
         self.missing_imu_records = 0
         
         # Load all record metadata

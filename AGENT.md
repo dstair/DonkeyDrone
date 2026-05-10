@@ -377,3 +377,109 @@ Suggested next refactor:
 2. Extract Gazebo telemetry helpers (`_SimTelemetry`, `_PoseTracker`, quaternion conversion) from `drone_gym.py` into a focused module, e.g. `donkeydrone/gz_telemetry.py`.
 3. Extract shared `build_drone_env(cfg, airframe=...)` construction so `drone_manage.py` and `autonomous_collect.py` do not duplicate the long `DroneGymEnv(...)` argument list.
 4. Consider making autonomous flight profiles pluggable (`--profile=figure-eight`, `--profile=hover-sweep`, etc.) once the code is cleaner.
+
+## Current Handoff (2026-05-09 evening)
+
+Session goal was to continue the new-format drone data work, refactor it, validate real scripted collection, then start objective model evaluation.
+
+Completed refactor work:
+- Added shared tub schema module `donkeydrone/tub_schema.py` with `DRONE_TUB_INPUTS`, `DRONE_TUB_TYPES`, `IMU_KEYS`, and `drone_tub_schema(...)`.
+- Added `donkeydrone/gz_telemetry.py` and moved Gazebo telemetry helpers out of `drone_gym.py`:
+  - pose + IMU subscription
+  - quaternion-to-Euler conversion
+  - pose tracker for altitude-hold vertical velocity
+- Added `donkeydrone/drone_env.py` with shared `build_drone_env(...)`.
+- Updated `drone_manage.py`, `autonomous_collect.py`, and `dataset.py` to use the shared schema and env construction.
+- Refactor behavior was compile checked:
+  ```bash
+  uv run --env-file .env python -m py_compile \
+    donkeydrone/drone_gym.py donkeydrone/drone_env.py donkeydrone/gz_telemetry.py \
+    donkeydrone/tub_schema.py donkeydrone/drone_manage.py \
+    donkeydrone/autonomous_collect.py donkeydrone/dataset.py \
+    donkeydrone/torch_train.py donkeydrone/torch_pilot.py
+  ```
+- `autonomous_collect.py --help` imports cleanly after refactor.
+- One-epoch training smoke on `data/tub_210_26-05-09` completed and saved `/private/tmp/tub_210_refactor_smoke.pth`.
+
+Real collection validation after refactor:
+```bash
+GZ_HEADLESS=1 ./scripts/start.sh --no-manage --airframe=65mm
+uv run --env-file .env python donkeydrone/autonomous_collect.py \
+  --airframe=65mm --duration=3 --warmup=1 --rate-hz=5 --ready-timeout=30
+bash ./scripts/stop_all.sh
+```
+
+Results:
+- New tub created: `data/tub_211_26-05-09`
+- `15` records written.
+- Catalog check: `rows=15 samples=15 missing_imu=0 nonzero_imu=15`.
+- First sample had nonzero IMU values, e.g. `imu/acl_z=-9.825064663923019`.
+- Sim stack was stopped afterward. `pgrep -fl 'betaflight_SITL|gz sim|ruby.*gz'` returned nothing.
+
+Model/evaluation work:
+- User created `donkeydrone/evaluate.py` from Gemini guidance. Initial file included pasted markdown after Python code and failed with:
+  `SyntaxError: unterminated string literal`.
+- Replaced it with a CLI evaluator that supports:
+  - `--model` for single-model metrics.
+  - `--old-model` + `--new-model` for comparison.
+  - `--tubs`, `--image-h`, `--image-w`, `--seq-len`, `--batch-size`.
+  - Metrics: per-axis MAE, RMSE, correlation, and output jitter.
+- `evaluate.py` also detects old IMU-FC checkpoints (`imu_fc.*` keys) and loads them with a compatibility model. This matters because current `torch_model.py` now uses `imu_gru`, while available smoke checkpoints from earlier in the day use `imu_fc`.
+- `uv run --env-file .env python -m py_compile donkeydrone/evaluate.py` passed.
+
+Available checkpoints in `/private/tmp`:
+- `/private/tmp/tub_210_test.pth` - old IMU-FC checkpoint from earlier smoke.
+- `/private/tmp/tub_210_refactor_smoke.pth` - old IMU-FC checkpoint after refactor smoke.
+- `/private/tmp/tub_210_gru_smoke.pth` - one-epoch checkpoint trained with current GRU-based `torch_model.py`.
+
+Evaluation runs/results:
+```bash
+uv run --env-file .env python donkeydrone/evaluate.py \
+  --tubs=data/tub_211_26-05-09 \
+  --old-model=/private/tmp/tub_210_test.pth \
+  --new-model=/private/tmp/tub_210_refactor_smoke.pth
+```
+- Old MAE: steering `0.0602`, throttle `0.1099`, altitude `0.0365`.
+- New MAE: steering `0.0815`, throttle `0.0894`, altitude `0.0187`.
+- On this tiny 15-sample held-out tub, the refactor smoke checkpoint improved throttle/altitude MAE but worsened steering MAE.
+
+Then trained a current GRU smoke checkpoint:
+```bash
+uv run --env-file .env python donkeydrone/torch_train.py \
+  --tubs=data/tub_210_26-05-09 \
+  --model=/private/tmp/tub_210_gru_smoke.pth \
+  --max-epochs=1
+```
+- Completed on MPS.
+- Best validation loss: `0.005988`.
+
+Compared old IMU-FC vs current GRU smoke on held-out `tub_211`:
+```bash
+uv run --env-file .env python donkeydrone/evaluate.py \
+  --tubs=data/tub_211_26-05-09 \
+  --old-model=/private/tmp/tub_210_refactor_smoke.pth \
+  --new-model=/private/tmp/tub_210_gru_smoke.pth
+```
+- Old IMU-FC MAE: steering `0.0815`, throttle `0.0894`, altitude `0.0187`.
+- New GRU MAE: steering `0.1470`, throttle `0.1105`, altitude `0.0684`.
+- On this tiny held-out tub, the one-epoch GRU smoke checkpoint was worse on MAE across all three axes. Treat this as a smoke result only, not a real architecture verdict.
+
+Current working tree at handoff:
+```bash
+git status --short --untracked-files=all
+ M donkeydrone/smoke_test.py
+ M donkeydrone/torch_model.py
+ M donkeydrone/torch_train.py
+?? donkeydrone/evaluate.py
+```
+
+Important caution:
+- The modifications to `smoke_test.py`, `torch_model.py`, and `torch_train.py` appear to be user/new-session work. Do not revert them.
+- `evaluate.py` is new and currently contains the CLI evaluator plus compatibility loader for old IMU-FC checkpoints.
+- If continuing evaluation, use a larger, fixed benchmark tub; 15 records is enough only for smoke testing.
+
+Recommended next steps:
+1. Inspect the dirty changes in `torch_model.py`, `torch_train.py`, and `smoke_test.py` before editing; current `torch_model.py` uses an IMU GRU.
+2. Decide whether `evaluate.py` should keep legacy IMU-FC checkpoint support or only support current GRU models.
+3. Create a larger benchmark tub (or reserve one existing high-quality tub) and always evaluate new checkpoints against that same held-out data.
+4. Add CLI/config support in `evaluate.py` if needed for non-320x240 configs, multiple tubs, CSV/JSON output, or aggregate score weighting by axis.

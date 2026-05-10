@@ -5,8 +5,6 @@ from PIL import Image
 import os
 import json
 
-from tub_schema import IMU_KEYS
-
 class TubDataset(Dataset):
     def __init__(self, tub_paths, seq_len=3, transform=None):
         """
@@ -19,7 +17,10 @@ class TubDataset(Dataset):
         self.seq_len = seq_len
         self.transform = transform
         self.records = []
-        self.imu_keys = IMU_KEYS
+        self.imu_keys = [
+            'imu/acl_x', 'imu/acl_y', 'imu/acl_z',
+            'imu/gyr_x', 'imu/gyr_y', 'imu/gyr_z'
+        ]
         self.missing_imu_records = 0
         
         # Load all record metadata
@@ -102,13 +103,19 @@ class TubDataset(Dataset):
         # 3. Load Targets [steering, throttle, altitude]
         # Based on drone_config_65mm mapping: 
         # steering -> yaw, throttle -> pitch, altitude -> motor throttle
-        targets = torch.tensor([
-            record.get('user/angle', 0.0),      # steering
-            record.get('user/throttle', 0.0),   # pitch
-            record.get('user/altitude', 0.0)    # altitude/thrust
-        ], dtype=torch.float32)
+        def get_ctrl(r):
+            return [r.get('user/angle', 0.0), r.get('user/throttle', 0.0), r.get('user/altitude', 0.0)]
 
-        return image, imu_tensor, targets
+        targets = torch.tensor(get_ctrl(record), dtype=torch.float32)
+
+        # 4. Load Previous Controls (Control Feedback)
+        prev_idx = max(0, idx - 1)
+        if self.records[prev_idx]['_tub_path'] != tub_path:
+            prev_idx = idx # Boundary fallback
+        
+        prev_controls = torch.tensor(get_ctrl(self.records[prev_idx]), dtype=torch.float32)
+
+        return image, imu_tensor, prev_controls, targets
 
 '''
 ### How to use this in your training script:

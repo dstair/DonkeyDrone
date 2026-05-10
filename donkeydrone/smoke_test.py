@@ -26,12 +26,13 @@ def run_smoke_test():
     # 1. Instantiate Model
     model = LinearModel(input_shape=(3, image_h, image_w), imu_shape=(imu_seq_len, 6)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    criterion = nn.MSELoss()
+    criterion = nn.HuberLoss()
 
     # 2. Generate Synthetic Data (Random noise)
     # Vision Input: (B, 3, H, W) | IMU Input: (B, Seq, 6)
     dummy_input = torch.randn(batch_size, 3, image_h, image_w).to(device)
     dummy_imu = torch.randn(batch_size, imu_seq_len, 6).to(device)
+    dummy_prev_ctrl = torch.randn(batch_size, 3).to(device)
     # Labels: (B, 3) -> [steering, throttle, altitude]
     dummy_labels = torch.randn(batch_size, 3).to(device)
 
@@ -42,7 +43,7 @@ def run_smoke_test():
     
     for i in range(10):
         optimizer.zero_grad()
-        outputs = model(dummy_input, dummy_imu)
+        outputs = model(dummy_input, dummy_imu, dummy_prev_ctrl)
         loss = criterion(outputs, dummy_labels)
         loss.backward()
         optimizer.step()

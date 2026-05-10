@@ -95,7 +95,8 @@ def train(cfg, tub_paths, model_path, max_epochs_override=None):
         print(model)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.MSELoss()
+    # HuberLoss is more robust to outliers than MSE, reducing "twitchy" flight
+    criterion = nn.HuberLoss(delta=1.0)
 
     # Training loop
     best_val_loss = float('inf')
@@ -108,10 +109,10 @@ def train(cfg, tub_paths, model_path, max_epochs_override=None):
         # Train
         model.train()
         train_loss = 0.0
-        for images, imus, labels in train_loader:
-            images, imus, labels = images.to(device), imus.to(device), labels.to(device)
+        for images, imus, prev_ctrls, labels in train_loader:
+            images, imus, prev_ctrls, labels = images.to(device), imus.to(device), prev_ctrls.to(device), labels.to(device)
             optimizer.zero_grad()
-            outputs = model(images, imus)
+            outputs = model(images, imus, prev_ctrls)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
@@ -122,9 +123,9 @@ def train(cfg, tub_paths, model_path, max_epochs_override=None):
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for images, imus, labels in val_loader:
-                images, imus, labels = images.to(device), imus.to(device), labels.to(device)
-                outputs = model(images, imus)
+            for images, imus, prev_ctrls, labels in val_loader:
+                images, imus, prev_ctrls, labels = images.to(device), imus.to(device), prev_ctrls.to(device), labels.to(device)
+                outputs = model(images, imus, prev_ctrls)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item() * images.size(0)
         val_loss /= n_val

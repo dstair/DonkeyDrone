@@ -66,9 +66,15 @@ fi
 BETAFLIGHT_BIN="${BETAFLIGHT_SITL_BIN:-$HOME/dev/betaflight/obj/main/betaflight_SITL.elf}"
 
 # ── Cleanup on exit ──────────────────────────────────────────────
+stop_xbox_bridge() {
+    pkill -f "XboxBridge.app|Contents/MacOS/XboxBridge" 2>/dev/null || true
+    rm -f /tmp/donkeydrone_xbox.sock 2>/dev/null || true
+}
+
 cleanup() {
     echo ""
     echo "Stopping all processes..."
+    stop_xbox_bridge
     # Kill all background children of this script
     jobs -p | xargs -r kill -9 2>/dev/null
     # Fall back to pkill for any stragglers
@@ -461,8 +467,7 @@ else
             exit 1
         fi
         # Kill any prior instance so it re-enumerates the controller cleanly.
-        pkill -f XboxBridge.app 2>/dev/null || true
-        rm -f /tmp/donkeydrone_xbox.sock
+        stop_xbox_bridge
         sleep 0.3
         echo "Starting XboxBridge.app (controller → UDS @ /tmp/donkeydrone_xbox.sock)..."
         open "$XBOX_APP"

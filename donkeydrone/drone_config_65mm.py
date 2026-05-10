@@ -52,7 +52,7 @@ BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 #         level if disturbed — must be tested in sim before real flight.
 DRONE_ANGLE_MODE = True
 
-DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
+DRONE_MAX_PITCH_ANGLE = 45.0  # max pitch degrees (throttle input maps to pitch)
 DRONE_HOVER_THROTTLE = 1490  # Recalibrate this using --mode=inflight-hover
 DRONE_THROTTLE_RANGE = 100  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
 # Apply quadratic scaling to altitude input: at high TWR, more throttle gives
@@ -73,7 +73,7 @@ DRONE_INPUT_SENSITIVITY = 0.1
 # CH4 yaw deflection cap in PWM microseconds from center (1500). Yaw input at
 # hover PWM produces net upward thrust via motor-mixer ω² asymmetry — larger
 # deflections make the drone climb on every turn. Keep this small (20–40).
-DRONE_YAW_PWM_CAP = 30
+DRONE_YAW_PWM_CAP = 75
 
 # Yaw→throttle feed-forward (PWM step). When |steering| > ~0.01, CH3 is biased
 # down by exactly this many PWM (capped at -200) to cancel the upward thrust
@@ -88,7 +88,7 @@ DRONE_YAW_PWM_CAP = 30
 # loop and the upward bleed is small/absent — leaving FF on at 60 just drops
 # CH3 with nothing to cancel, and the drone descends on every yaw input.
 # Keep this 0 while in Acro; retune separately if you go back to Angle.
-DRONE_YAW_THROTTLE_FEEDFORWARD = 0.0
+DRONE_YAW_THROTTLE_FEEDFORWARD = -50.0
 
 # ---- Altitude Hold (Vertical Velocity Damper) ----
 # Proportional gain (PWM per m/s): -k_pwm * vz added to throttle when

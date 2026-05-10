@@ -148,9 +148,12 @@ class DroneGymEnv:
         # Arm signal from user/arm. None = legacy auto-arm (always armed after
         # boot disarm phase). True/False = explicit arm control (e.g. RT trigger).
         self.user_arm = None
+        self._prev_user_arm = None
+        self._explicit_arm_started_at = None
         self.last_pitch_pwm = 1500
         self.last_yaw_pwm = 1500
         self.last_throttle_pwm = 1000
+        self.last_arm_pwm = 1000
         self.last_mode_pwm = 2000 if self.angle_mode else 1000
         self.frame = np.zeros((image_h, image_w, 3), dtype=np.uint8)
         self.position = (0.0, 0.0, 0.0)
@@ -359,7 +362,7 @@ class DroneGymEnv:
             yaw_ff_bias = -int(self.yaw_throttle_feedforward)
         yaw_ff_bias = max(-200, min(0, yaw_ff_bias))
 
-        channels[2] = int(
+        throttle_pwm = int(
             max(
                 1000,
                 min(
@@ -371,6 +374,10 @@ class DroneGymEnv:
                 ),
             )
         )
+        if self.user_arm is True and self._explicit_arm_started_at is not None:
+            if time.time() - self._explicit_arm_started_at < 1.0:
+                throttle_pwm = 1000
+        channels[2] = throttle_pwm
 
         # CH4: yaw — capped separately from pitch sensitivity. At hover
         # throttle, yaw deflection adds net thrust via ω² mixer asymmetry;
@@ -388,6 +395,7 @@ class DroneGymEnv:
         self.last_pitch_pwm = channels[1]
         self.last_throttle_pwm = channels[2]
         self.last_yaw_pwm = channels[3]
+        self.last_arm_pwm = channels[self.arm_channel]
         self.last_mode_pwm = channels[self.mode_channel]
 
         return channels
@@ -581,7 +589,7 @@ class DroneGymEnv:
             if loop_count % 100 == 0:
                 logger.info(
                     "rc: steer=%.2f thr=%.2f alt=%.2f mode=%s → "
-                    "pitch=%d yaw=%d throttle=%d ch%d=%d",
+                    "pitch=%d yaw=%d throttle=%d ch%d=%d ch%d=%d",
                     self.steering,
                     self.throttle,
                     self.altitude,
@@ -589,6 +597,8 @@ class DroneGymEnv:
                     channels[1],
                     channels[3],
                     channels[2],
+                    self.arm_channel + 1,
+                    channels[self.arm_channel],
                     self.mode_channel + 1,
                     channels[self.mode_channel],
                 )
@@ -690,6 +700,12 @@ class DroneGymEnv:
         self.throttle = float(throttle)
         self.altitude = float(altitude)
         self.user_arm = user_arm if isinstance(user_arm, bool) else None
+        if self.user_arm is True and self._prev_user_arm is not True:
+            self._explicit_arm_started_at = time.time()
+            logger.info("Explicit arm requested; holding throttle low for 1.0s")
+        if self.user_arm is not True:
+            self._explicit_arm_started_at = None
+        self._prev_user_arm = self.user_arm
 
         # Read camera frame
         if self.camera_source == "gz_transport":

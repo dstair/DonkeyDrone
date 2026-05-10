@@ -86,6 +86,7 @@ class XboxDroneController:
         self._mode_idx = 0
         self._prev_a = False
         self._prev_b = False
+        self._prev_armed_logged = None
         self._tick = 0
         self._ticks_since_frame = _STALE_TICK_THRESHOLD + 1
         self._frames_seen = 0
@@ -178,6 +179,14 @@ class XboxDroneController:
 
         # Right trigger: 0..1, deadman arm.
         self.armed = rT > self.arm_threshold
+        if self.armed != self._prev_armed_logged:
+            logger.info(
+                "xbox: armed=%s (RT=%.2f threshold=%.2f)",
+                self.armed,
+                rT,
+                self.arm_threshold,
+            )
+            self._prev_armed_logged = self.armed
 
         if btn_a and not self._prev_a:
             self.recording = not self.recording

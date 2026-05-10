@@ -118,7 +118,7 @@ class LinearModel(nn.Module):
             nn.Linear(64, 3)
         )
 
-    def forward(self, img, imu, prev_ctrl):
+    def forward(self, img, imu, prev_ctrl=None):
         # Image branch
         x = self.init_conv(img)
         x = self.layer1(x)
@@ -132,6 +132,9 @@ class LinearModel(nn.Module):
         # we only take the last hidden state representing the sequence summary
         _, h_n = self.imu_gru(imu)
         imu_feat = h_n[-1] # Shape: (Batch, hidden_dim)
+
+        if prev_ctrl is None:
+            prev_ctrl = torch.zeros(img.shape[0], 3, device=img.device, dtype=img.dtype)
 
         # Control Feedback branch
         ctrl_feat = self.ctrl_fc(prev_ctrl)

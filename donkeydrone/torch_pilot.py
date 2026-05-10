@@ -7,7 +7,10 @@ Implements the same run(img_arr) → (steering, throttle, altitude) interface.
 import numpy as np
 import torch
 
-from torch_model import LinearModel
+try:
+    from .torch_model import LinearModel
+except ImportError:
+    from torch_model import LinearModel
 
 
 class TorchPilot:
@@ -28,6 +31,7 @@ class TorchPilot:
         self.model = LinearModel(input_shape=input_shape, imu_shape=(seq_len, 6)).to(self.device)
         self.model.eval()
         self._imu_history = np.zeros((seq_len, 6), dtype=np.float32)
+        self._prev_ctrl = np.zeros(3, dtype=np.float32)
 
     def load(self, model_path):
         state_dict = torch.load(model_path, map_location=self.device, weights_only=True)
@@ -50,11 +54,13 @@ class TorchPilot:
         self._imu_history = np.roll(self._imu_history, shift=-1, axis=0)
         self._imu_history[-1] = imu_sample
         imu_tensor = torch.from_numpy(self._imu_history).unsqueeze(0).to(self.device)
+        prev_ctrl_tensor = torch.from_numpy(self._prev_ctrl).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            output = self.model(tensor, imu_tensor)
+            output = self.model(tensor, imu_tensor, prev_ctrl_tensor)
 
         steering = float(output[0, 0])
         throttle = float(output[0, 1])
         altitude = float(output[0, 2])
+        self._prev_ctrl[:] = [steering, throttle, altitude]
         return steering, throttle, altitude

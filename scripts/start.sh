@@ -80,6 +80,14 @@ trap cleanup EXIT INT TERM
 LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
+EXISTING_STACK="$(pgrep -fl 'betaflight_SITL|gz sim|ruby.*gz|gz_camera_worker.py|drone_manage.py drive' || true)"
+if [ -n "$EXISTING_STACK" ]; then
+    echo "ERROR: existing DonkeyDrone sim processes are still running:" >&2
+    echo "$EXISTING_STACK" >&2
+    echo "Run: bash $SCRIPT_DIR/stop_all.sh" >&2
+    exit 1
+fi
+
 # ── Launch BetaFlight SITL (before Gazebo to avoid FDM-during-init crash) ──
 BF_LOG="$LOG_DIR/betaflight.log"
 

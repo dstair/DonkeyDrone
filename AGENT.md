@@ -483,3 +483,71 @@ Recommended next steps:
 2. Decide whether `evaluate.py` should keep legacy IMU-FC checkpoint support or only support current GRU models.
 3. Create a larger benchmark tub (or reserve one existing high-quality tub) and always evaluate new checkpoints against that same held-out data.
 4. Add CLI/config support in `evaluate.py` if needed for non-320x240 configs, multiple tubs, CSV/JSON output, or aggregate score weighting by axis.
+
+## Current Handoff (2026-05-09 late evening)
+
+Continued evaluation/model workflow work:
+- `donkeydrone/evaluate.py` now defaults to the fixed held-out benchmark tub `data/tub_209_26-05-09` when `--tubs`/`--benchmark-tubs` are omitted. This tub has `50` samples, `missing_imu=0`, and `nonzero_imu=50`.
+- The default benchmark can be overridden with `--tubs`, `--benchmark-tubs`, or `DONKEYDRONE_BENCHMARK_TUBS`.
+- Evaluator now supports three checkpoint formats:
+  - `legacy_imu_fc` (`imu_fc.*` keys)
+  - `legacy_imu_gru` (`imu_gru.*` keys but no control-feedback branch)
+  - current `control_feedback` checkpoints (`ctrl_fc.*` keys)
+- Evaluator now accepts dataset batches as `(image, imu, prev_ctrl, target)`, computes an equal-weight MAE score by default, accepts `--weights steering,throttle,altitude`, and can write machine-readable results with `--json-output`.
+- `torch_model.LinearModel.forward(...)` now accepts `prev_ctrl=None` and substitutes zero controls, preserving simple two-input smoke/debug calls while training/evaluation pass real previous controls.
+- `torch_pilot.py` now passes previous model outputs back into the model as `prev_ctrl`, so runtime inference matches the current training graph. Its import also works both as `torch_pilot` from the DonkeyCar script path and as `donkeydrone.torch_pilot`.
+
+Validation performed:
+```bash
+uv run --env-file .env python -m py_compile \
+  donkeydrone/evaluate.py donkeydrone/torch_model.py donkeydrone/torch_pilot.py \
+  donkeydrone/torch_train.py donkeydrone/smoke_test.py donkeydrone/dataset.py
+
+uv run --env-file .env python donkeydrone/evaluate.py \
+  --old-model=/private/tmp/tub_210_refactor_smoke.pth \
+  --new-model=/private/tmp/tub_210_gru_smoke.pth \
+  --json-output=/private/tmp/donkeydrone_eval_compare.json
+
+uv run --env-file .env python donkeydrone/torch_train.py \
+  --tubs=data/tub_210_26-05-09 \
+  --model=/private/tmp/tub_210_ctrl_smoke.pth \
+  --max-epochs=1
+
+uv run --env-file .env python donkeydrone/evaluate.py \
+  --old-model=/private/tmp/tub_210_refactor_smoke.pth \
+  --new-model=/private/tmp/tub_210_ctrl_smoke.pth \
+  --json-output=/private/tmp/donkeydrone_eval_ctrl_compare.json
+
+uv run --env-file .env python donkeydrone/smoke_test.py
+```
+
+Benchmark results on held-out `data/tub_209_26-05-09`:
+- Old IMU-FC `/private/tmp/tub_210_refactor_smoke.pth`: score `0.1669`, MAE steering `0.2522`, throttle `0.1717`, altitude `0.0768`.
+- Old GRU `/private/tmp/tub_210_gru_smoke.pth`: score `0.2011`, MAE steering `0.3178`, throttle `0.1590`, altitude `0.1264`.
+- Current control-feedback `/private/tmp/tub_210_ctrl_smoke.pth`: score `0.1406`, MAE steering `0.2010`, throttle `0.1512`, altitude `0.0695`.
+- Current control-feedback smoke improved equal-weight MAE score by `15.78%` vs the old IMU-FC smoke on this fixed benchmark. Treat as smoke-level evidence only; training tub still had only 15 samples.
+
+Additional runtime check:
+```bash
+uv run --env-file .env python - <<'PY'
+import numpy as np
+from donkeydrone.torch_pilot import TorchPilot
+pilot = TorchPilot(input_shape=(3, 240, 320), seq_len=3)
+pilot.load('/private/tmp/tub_210_ctrl_smoke.pth')
+print(tuple(round(v, 6) for v in pilot.run(np.zeros((240, 320, 3), dtype=np.uint8))))
+PY
+```
+- Loaded on MPS and returned `(0.068052, 0.110246, 0.078214)`.
+
+Current working tree after this step:
+```bash
+ M AGENT.md
+ M donkeydrone/evaluate.py
+ M donkeydrone/torch_model.py
+ M donkeydrone/torch_pilot.py
+```
+
+Recommended next steps:
+1. Collect a larger dedicated benchmark tub and update `DEFAULT_BENCHMARK_TUBS` (or use `DONKEYDRONE_BENCHMARK_TUBS`) so model comparisons are based on more than 50 held-out samples.
+2. Train current control-feedback checkpoints on more than `data/tub_210_26-05-09`; the present comparison is useful for plumbing, not architecture selection.
+3. Consider moving checkpoint compatibility classes out of `evaluate.py` if old checkpoints need to be loaded by runtime inference too.

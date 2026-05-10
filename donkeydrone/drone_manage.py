@@ -544,9 +544,13 @@ def drive(
         thr_range = getattr(cfg, "DRONE_THROTTLE_RANGE", 300)
         max_pitch = getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0)
         delay_ms = getattr(cfg, "SIMULATED_DELAY_MS", 0)
+        angle_mode = getattr(cfg, "DRONE_ANGLE_MODE", True)
+        altitude_hold = getattr(cfg, "DRONE_ALTITUDE_HOLD_ENABLED", False)
         print(f"  RC UDP:    {rc_host}:{rc_port}")
         print(f"  Camera:    {camera_info}")
+        print(f"  Mode:      {'ANGLE' if angle_mode else 'ACRO'}")
         print(f"  Hover PWM: {hover} ± {thr_range}")
+        print(f"  Alt hold:  {'on' if altitude_hold else 'off'}")
         print(f"  Max pitch: {max_pitch}°")
         print(f"  Max yaw:   {getattr(cfg, 'DRONE_MAX_YAW_RATE', 90.0)} deg/s")
         if delay_ms > 0:

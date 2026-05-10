@@ -151,6 +151,7 @@ class DroneGymEnv:
         self.last_pitch_pwm = 1500
         self.last_yaw_pwm = 1500
         self.last_throttle_pwm = 1000
+        self.last_mode_pwm = 2000 if self.angle_mode else 1000
         self.frame = np.zeros((image_h, image_w, 3), dtype=np.uint8)
         self.position = (0.0, 0.0, 0.0)
         self.attitude = (0.0, 0.0, 0.0)
@@ -165,6 +166,7 @@ class DroneGymEnv:
         self._last_seq = 0  # sequence counter for new-frame detection
         self._frame_size = image_h * image_w * 3
         self._frame_skip = 0
+        self._logged_frame_stats = False
 
         # Simulated camera delay buffer: deque of (timestamp_ms, frame)
         self._delay_buffer = collections.deque()
@@ -182,6 +184,14 @@ class DroneGymEnv:
                 deadband=self.altitude_hold_deadband,
                 enabled=self.altitude_hold_enabled,
             )
+
+        logger.info(
+            "Flight mode request: %s (CH%d/AUX%d PWM=%d)",
+            "ANGLE" if self.angle_mode else "ACRO",
+            self.mode_channel + 1,
+            self.mode_channel - 3,
+            self.last_mode_pwm,
+        )
 
     def _start_camera(self):
         """Open RTSP stream from Gazebo (Docker mode)."""
@@ -260,6 +270,19 @@ class DroneGymEnv:
             self.frame = np.frombuffer(frame_bytes, dtype=np.uint8).reshape(
                 self.image_h, self.image_w, 3
             )
+            if not self._logged_frame_stats:
+                logger.info(
+                    "Camera frame stats: min=%d max=%d mean=%.1f",
+                    int(self.frame.min()),
+                    int(self.frame.max()),
+                    float(self.frame.mean()),
+                )
+                if self.frame.max() == 0:
+                    logger.warning(
+                        "Camera frames are arriving but are all black. "
+                        "Check Gazebo sensor rendering and camera pose/topic."
+                    )
+                self._logged_frame_stats = True
             if self._frame_skip == 0:
                 logger.info(
                     "Frame updated (seq=%d, shape=%s, dtype=%s)",
@@ -365,6 +388,7 @@ class DroneGymEnv:
         self.last_pitch_pwm = channels[1]
         self.last_throttle_pwm = channels[2]
         self.last_yaw_pwm = channels[3]
+        self.last_mode_pwm = channels[self.mode_channel]
 
         return channels
 
@@ -519,6 +543,15 @@ class DroneGymEnv:
                         "see scripts/start.sh CLI block.",
                         mode_bits or 0,
                     )
+                if not self.angle_mode and "ANGLE" in (active_modes or []):
+                    logger.warning(
+                        "ACRO mode requested but BF still reports ANGLE active "
+                        "(mode_bits=0x%08x, CH%d PWM=%d). Check aux bindings "
+                        "and confirm no other ANGLE range is active.",
+                        mode_bits or 0,
+                        self.mode_channel + 1,
+                        arm_channels[self.mode_channel],
+                    )
                 armed_ok = True
                 break
             logger.warning(
@@ -547,13 +580,17 @@ class DroneGymEnv:
             loop_count += 1
             if loop_count % 100 == 0:
                 logger.info(
-                    "rc: steer=%.2f thr=%.2f alt=%.2f → pitch=%d yaw=%d throttle=%d",
+                    "rc: steer=%.2f thr=%.2f alt=%.2f mode=%s → "
+                    "pitch=%d yaw=%d throttle=%d ch%d=%d",
                     self.steering,
                     self.throttle,
                     self.altitude,
+                    "ANGLE" if self.angle_mode else "ACRO",
                     channels[1],
                     channels[3],
                     channels[2],
+                    self.mode_channel + 1,
+                    channels[self.mode_channel],
                 )
 
             # RTSP mode: poll for frames every other iteration

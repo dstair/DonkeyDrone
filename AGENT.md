@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENT.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working in this repository. Start here in a fresh session, then read the newest "Current Handoff" section at the bottom before editing or running long commands.
 
 ## Project Summary
 
@@ -38,11 +38,30 @@ uv run --env-file .env python -W ignore::SyntaxWarning donkeydrone/drone_manage.
 # Scripted no-human data collection + training smoke/test run
 ./scripts/collect_train.sh --airframe=65mm --duration=30 --max-epochs=5 --model=models/scripted_autonomous.pth
 
-# Train CNN
-uv run python donkeydrone/torch_train.py --tubs=data/tub_NN_YY-MM-DD --model=models/pilot.pth
+# Train CNN (full/default run; can take a while)
+uv run --env-file .env python donkeydrone/torch_train.py --tubs=data/tub_NN_YY-MM-DD --model=models/pilot.pth
 
 # Multiple tubs (comma-separated)
-uv run python donkeydrone/torch_train.py --tubs=data/tub_1_26-03-01,data/tub_2_26-03-01 --model=models/pilot.pth
+uv run --env-file .env python donkeydrone/torch_train.py --tubs=data/tub_1_26-03-01,data/tub_2_26-03-01 --model=models/pilot.pth
+
+# Bounded hello-world training run (known to finish quickly on Apple Silicon)
+uv run --env-file .env python donkeydrone/torch_train.py \
+  --tubs=data/tub_3_26-05-09 \
+  --model=models/hello_world_tub3.pth \
+  --max-epochs=1 \
+  --max-samples=400 \
+  --batch-size=64 \
+  --no-model-summary
+
+# Evaluate one model on a held-out tub
+uv run --env-file .env python donkeydrone/evaluate.py \
+  --tubs=data/tub_4_26-05-09 \
+  --model=models/hello_world_tub3.pth
+
+# Compare two models; if --tubs is omitted, evaluate.py uses its default benchmark tub
+uv run --env-file .env python donkeydrone/evaluate.py \
+  --old-model=models/tub_3_26-05-09.pth \
+  --new-model=models/hello_world_tub3.pth
 
 # Stop everything
 bash ./scripts/stop_all.sh
@@ -56,13 +75,65 @@ uv run --env-file .env python -c "import gz.transport13; print('OK')"
 
 Web UI: http://127.0.0.1:8887
 
+## Fresh Session Checklist
+
+1. Read the newest `## Current Handoff (...)` section near the bottom.
+2. Check local changes before editing:
+   ```bash
+   git status --short --branch
+   git diff --stat
+   ```
+3. Avoid full/default training unless explicitly requested. Use bounded flags (`--max-epochs`, `--max-samples`, `--batch-size`, `--no-model-summary`) for smoke runs.
+4. Use `bash ./scripts/stop_all.sh` before and after sim tests if Gazebo/BetaFlight/XboxBridge might already be running.
+5. Do not edit `donkeydrone/config.py` for local tuning; edit `donkeydrone/drone_config_65mm.py` or `donkeydrone/drone_config_85mm.py`.
+
+## Verification / Tests
+
+There is no formal pytest suite. Use these targeted checks:
+
+```bash
+# Import/compile check for the main Python modules
+uv run --env-file .env python -m py_compile \
+  donkeydrone/drone_gym.py donkeydrone/drone_env.py donkeydrone/gz_telemetry.py \
+  donkeydrone/tub_schema.py donkeydrone/drone_manage.py \
+  donkeydrone/autonomous_collect.py donkeydrone/dataset.py \
+  donkeydrone/torch_model.py donkeydrone/torch_pilot.py \
+  donkeydrone/torch_train.py donkeydrone/evaluate.py donkeydrone/smoke_test.py
+
+# Script CLI/import smoke checks
+uv run --env-file .env python donkeydrone/torch_train.py --help
+uv run --env-file .env python donkeydrone/evaluate.py --help
+uv run --env-file .env python donkeydrone/autonomous_collect.py --help
+
+# Model load/inference smoke for a .pth checkpoint
+uv run --env-file .env python - <<'PY'
+import numpy as np
+from donkeydrone.torch_pilot import TorchPilot
+pilot = TorchPilot(input_shape=(3, 240, 320), seq_len=3)
+pilot.load('models/hello_world_tub3.pth')
+print(tuple(round(float(v), 6) for v in pilot.run(np.zeros((240, 320, 3), dtype=np.uint8))))
+PY
+
+# Gazebo/BetaFlight hover/thrust integration test
+./scripts/test_thrust.sh --airframe=65mm
+```
+
+For headless scripted collection:
+
+```bash
+GZ_HEADLESS=1 ./scripts/start.sh --no-manage --airframe=65mm
+uv run --env-file .env python donkeydrone/autonomous_collect.py \
+  --airframe=65mm --duration=3 --warmup=1 --rate-hz=5 --ready-timeout=30
+bash ./scripts/stop_all.sh
+```
+
 ## Python Environment
 
 - **Python 3.12 exactly** (`requires-python = "==3.12.*"`)
 - Package manager: `uv` (not pip)
 - `.env` file at project root is required (sets PYTHONPATH, DYLD_LIBRARY_PATH, GZ_IP)
 - gz-python is NOT on PyPI — installed by `brew install gz-harmonic` into Homebrew site-packages
-- No tests, no linting/formatting configuration
+- No formal pytest suite or linting/formatting configuration; use the targeted checks above.
 
 ## Architecture
 
@@ -111,17 +182,28 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 |------|---------|
 | `donkeydrone/drone_manage.py` | Main entry point |
 | `donkeydrone/drone_gym.py` | DroneGymEnv: BetaFlight RC UDP + camera bridge |
+| `donkeydrone/drone_env.py` | Shared builder for constructing `DroneGymEnv` from config |
+| `donkeydrone/gz_telemetry.py` | Gazebo pose/IMU telemetry helpers |
 | `donkeydrone/drone_config_65mm.py` | Air65 (65mm, ~31g AUW) config — default airframe |
 | `donkeydrone/drone_config_85mm.py` | FlyWoo Flylens (85mm, ~125g AUW) config — alternate airframe |
 | `donkeydrone/config.py` | Base DonkeyCar config (**do not modify**) |
 | `donkeydrone/gz_camera_worker.py` | Subprocess: gz-transport camera → shared memory |
-| `donkeydrone/torch_model.py` | CNN architecture (LinearModel, PyTorch) |
+| `donkeydrone/tub_schema.py` | Shared tub input/type schema and IMU key list |
+| `donkeydrone/dataset.py` | PyTorch tub dataset loader for image + IMU + previous controls |
+| `donkeydrone/torch_model.py` | Current PyTorch `LinearModel` architecture |
 | `donkeydrone/torch_pilot.py` | Inference wrapper for vehicle loop |
 | `donkeydrone/torch_train.py` | Training script |
+| `donkeydrone/evaluate.py` | Offline checkpoint evaluator and model comparison CLI |
+| `donkeydrone/autonomous_collect.py` | Headless scripted data collector |
+| `donkeydrone/smoke_test.py` | Lightweight local smoke checks |
 | `scripts/start.sh` | One-command launcher. Flags: `--airframe=65mm\|85mm` (default 65mm), `--no-manage` (sim stack only). |
 | `scripts/stop_all.sh` | Force-kill all processes |
+| `scripts/stop-all.sh` | Compatibility wrapper around `scripts/stop_all.sh` |
+| `scripts/collect_train.sh` | Starts sim stack, runs scripted collection, then trains |
 | `scripts/test_thrust.sh` | Wrapper: `start.sh --no-manage --airframe=$X` + `test_thrust.py` + teardown |
 | `donkeydrone/test_thrust.py` | Ramps throttle 1000→2000 PWM and reports altitude at each step; used for tuning `motorConstant` and finding hover PWM |
+| `data/` | Recorded DonkeyCar tub folders (`tub_N_YY-MM-DD`) |
+| `models/` | Saved `.pth` checkpoints and baseline pilot models |
 | `worlds/drone_course_65mm.sdf` | 65mm Air65 world (includes `betaloop_drone_cam_65mm`) |
 | `worlds/drone_course_85mm.sdf` | 85mm FlyWoo Flylens world (includes `betaloop_drone_cam_85mm`) |
 
@@ -146,9 +228,26 @@ Controlled by `DRONE_CAMERA_SOURCE` in your `donkeydrone/drone_config_XXmm.py`:
 
 ## CNN Model (LinearModel)
 
-- 5× Conv2d (stride 2 or 1, ReLU, Dropout 0.2) → Flatten → Dense(100) → Dense(50) → Linear(3) [steering, throttle, altitude]
-- Input: `(B, 3, H, W)` float32 [0,1]. Fully size-agnostic (adapts to IMAGE_W/IMAGE_H)
+- Current model in `donkeydrone/torch_model.py` uses a residual CNN image branch, GRU IMU branch, previous-control feedback branch, and multi-head attention fusion.
+- Inputs: image `(B, 3, H, W)` float32 `[0,1]`, IMU sequence `(B, seq_len, 6)`, previous controls `(B, 3)`.
+- Output: `(B, 3)` for `[steering, throttle, altitude]`.
+- Offline training/evaluation use `TubDataset`, which returns `(image, imu, prev_ctrl, target)`.
+- `TorchPilot` keeps an IMU history and feeds previous model outputs back as `prev_ctrl` during runtime inference.
 - Training uses MPS (Apple Silicon GPU) automatically if available, then CUDA, then CPU
+
+### Data and Model Artifacts
+
+Current useful local data:
+- `data/tub_3_26-05-09`: best training tub from recent work; `3368` rows/images; complete nonzero IMU.
+- `data/tub_4_26-05-09`: small held-out smoke/eval tub; `161` rows/images; complete IMU.
+- `data/tub_5_26-05-09` and `data/tub_6_26-05-09`: known empty or unusable.
+
+Current useful local models:
+- `models/hello_world_tub3.pth`: bounded hello-world checkpoint trained on 400 evenly spaced samples from `tub_3`; runtime load smoke passed.
+- `models/tub_3_26-05-09.pth`: partial checkpoint from a longer run that was manually stopped.
+- `models/pilot.pth`: older baseline.
+
+`donkeydrone/evaluate.py` can load current `control_feedback` checkpoints and legacy `legacy_imu_fc` / `legacy_imu_gru` formats for offline comparison.
 
 ## Important Config Parameters (`donkeydrone/drone_config_{65,85}mm.py`)
 
@@ -551,3 +650,230 @@ Recommended next steps:
 1. Collect a larger dedicated benchmark tub and update `DEFAULT_BENCHMARK_TUBS` (or use `DONKEYDRONE_BENCHMARK_TUBS`) so model comparisons are based on more than 50 held-out samples.
 2. Train current control-feedback checkpoints on more than `data/tub_210_26-05-09`; the present comparison is useful for plumbing, not architecture selection.
 3. Consider moving checkpoint compatibility classes out of `evaluate.py` if old checkpoints need to be loaded by runtime inference too.
+
+## Current Handoff (2026-05-09 night)
+
+Repository / branch state:
+- `feature/PX4-OSX-native-build` was fast-forward merged into `main`, pushed to `origin/main`, then deleted both remotely and locally.
+- Current branch is `main`.
+- At signoff, `git status --short --branch` was clean: `## main...origin/main`.
+
+Recent flight / controller work:
+- Angle mode flies well manually.
+- `DRONE_YAW_THROTTLE_FEEDFORWARD` sign-flip experiment was reverted to latest committed behavior. User found that the old behavior is better and will live with entering negative values locally if needed.
+- Xbox controller bridge was validated with `xbox_bridge/smoke_test.py`:
+  - frames arrived at ~60Hz
+  - sticks, RT, A, and B were detected
+  - `nonzero_input_seen=True`
+- `scripts/stop_all.sh` already kills XboxBridge; it was hardened to match both `XboxBridge.app` and `Contents/MacOS/XboxBridge`, and removes `/tmp/donkeydrone_xbox.sock`.
+- Added `scripts/stop-all.sh` as a compatibility wrapper around `scripts/stop_all.sh`.
+- `scripts/start.sh` now explicitly stops XboxBridge in its Ctrl+C/exit cleanup trap and before launching a fresh bridge for `--xbox`.
+- Xbox arm debugging showed:
+  - RT controls `user/arm`.
+  - Without RT held, `ch5=1000` and motors stay at `0.0`.
+  - With RT held, `ch5=2000`; however BetaFlight still would not re-arm if CH3 was already at hover/climb.
+- `drone_gym.py` was updated so an explicit Xbox arm transition holds CH3 at `1000` for `1.0s` while CH5 is high, then resumes normal hover/climb throttle. Verified mapping:
+  ```text
+  initial explicit arm ch3/ch5 1000 2000
+  after hold ch3/ch5 1590 2000
+  disarm ch3/ch5 1490 1000
+  ```
+- `drone_gym.py` RC logs now include CH5 and CH6 PWM. `xbox_controller.py` logs RT arm state changes.
+
+Data / model artifacts available now:
+- `data/tub_3_26-05-09`: good training tub, `3368` catalog rows and `3368` images.
+  - Validation during session showed: `missing_img=0`, `missing_imu=0`, `nonzero_imu=3368`.
+  - Controls had signal: steering nonzero `2527`, throttle nonzero `3118`, altitude nonzero `151`.
+- `data/tub_4_26-05-09`: small Xbox/control tub, `161` rows and `161` images.
+- `data/tub_5_26-05-09` and `data/tub_6_26-05-09`: empty or unusable.
+- Existing model files:
+  - `models/pilot.pth` old baseline.
+  - `models/tub_3_26-05-09.pth` partial training checkpoint, `9.9M`, created during a longer run that was manually stopped. It may be usable, but it was not a deliberate bounded "hello world" run.
+
+Training status:
+- A full/default `torch_train.py` run on `data/tub_3_26-05-09` was started:
+  ```bash
+  uv run --env-file .env python donkeydrone/torch_train.py \
+    --tubs=data/tub_3_26-05-09 \
+    --model=models/tub_3_26-05-09.pth
+  ```
+- It wrote a checkpoint, then was stopped at user request before natural completion.
+- Need next: a bounded "hello world" training run that finishes in <=5 minutes and creates an autopilot worth testing.
+
+Recommended next-session plan:
+1. Add or use a bounded training option that guarantees a short run. Existing `--max-epochs` helps, but the current full model can still take time on 3368 images. Prefer one of:
+   - train `--max-epochs=1` on a smaller tub subset, if subset support is added; or
+   - add CLI flags such as `--max-samples`, `--train-split`, `--no-model-summary`, and maybe `--batch-size`; or
+   - create a temporary subset tub from `data/tub_3_26-05-09` with ~300-600 records.
+2. Produce a test autopilot model, e.g. `models/hello_world_tub3.pth`.
+3. Run a quick evaluator pass on held-out data if practical:
+   ```bash
+   uv run --env-file .env python donkeydrone/evaluate.py \
+     --tubs=data/tub_4_26-05-09 \
+     --model=models/hello_world_tub3.pth
+   ```
+   `tub_4` is small and Xbox/control-biased, so treat it as a smoke check only.
+4. Test autopilot manually with:
+   ```bash
+   ./scripts/start.sh --model=models/hello_world_tub3.pth --airframe=65mm
+   ```
+   Watch the first seconds carefully; be ready to stop with Ctrl+C / `scripts/stop_all.sh`.
+
+## Current Handoff (2026-05-10 morning)
+
+Bounded hello-world training run completed successfully.
+
+Code change:
+- `donkeydrone/torch_train.py` now supports bounded smoke-training flags:
+  - `--max-samples` uses a deterministic, evenly spaced subset of the loaded dataset.
+  - `--batch-size` overrides config `BATCH_SIZE`.
+  - `--train-split` overrides config `TRAIN_TEST_SPLIT`.
+  - `--no-model-summary` skips verbose layer printing.
+  - Train/val random split now uses a fixed seed (`42`) for repeatability.
+
+Validation:
+```bash
+uv run --env-file .env python -m py_compile \
+  donkeydrone/torch_train.py donkeydrone/evaluate.py donkeydrone/dataset.py \
+  donkeydrone/torch_model.py donkeydrone/torch_pilot.py
+
+uv run --env-file .env python donkeydrone/torch_train.py --help
+```
+
+Training command:
+```bash
+time uv run --env-file .env python donkeydrone/torch_train.py \
+  --tubs=data/tub_3_26-05-09 \
+  --model=models/hello_world_tub3.pth \
+  --max-epochs=1 \
+  --max-samples=400 \
+  --batch-size=64 \
+  --no-model-summary
+```
+
+Training result:
+- Device: `mps`
+- Source tub samples: `3368`
+- Deterministic training subset: `400`
+- Train/val split: `320/80`
+- Epoch time: `5.9s`
+- Wall time from shell `time`: `7.937s`
+- Best validation loss: `0.091767`
+- Model written: `models/hello_world_tub3.pth` (`9.9M`)
+
+Quick evaluation on small held-out tub:
+```bash
+uv run --env-file .env python donkeydrone/evaluate.py \
+  --tubs=data/tub_4_26-05-09 \
+  --model=models/hello_world_tub3.pth \
+  --json-output=/private/tmp/hello_world_tub3_eval.json
+```
+
+Evaluation result on `data/tub_4_26-05-09`:
+- Samples: `161`
+- Missing IMU: `0`
+- Checkpoint kind: `control_feedback`
+- Equal-weight MAE score: `0.2356`
+- MAE: steering `0.0768`, throttle `0.2508`, altitude `0.3791`
+- RMSE: steering `0.1004`, throttle `0.3017`, altitude `0.5868`
+- Correlation: steering `-0.8059`, throttle `0.9632`, altitude `0.0961`
+- Treat this only as a smoke check; tub 4 is small and Xbox/control-biased.
+
+Runtime load smoke:
+```bash
+uv run --env-file .env python - <<'PY'
+import numpy as np
+from donkeydrone.torch_pilot import TorchPilot
+pilot = TorchPilot(input_shape=(3, 240, 320), seq_len=3)
+pilot.load('models/hello_world_tub3.pth')
+print(tuple(round(float(v), 6) for v in pilot.run(np.zeros((240, 320, 3), dtype=np.uint8))))
+PY
+```
+
+Output:
+```text
+TorchPilot: loaded models/hello_world_tub3.pth on mps
+(0.055345, 0.193857, -0.05971)
+```
+
+Autopilot test command:
+```bash
+./scripts/start.sh --model=models/hello_world_tub3.pth --airframe=65mm
+```
+
+Watch the first seconds carefully and be ready to stop with Ctrl+C or:
+```bash
+bash ./scripts/stop_all.sh
+```
+
+## Current Handoff (2026-05-10 full tub 3 training)
+
+Full `data/tub_3_26-05-09` training run completed.
+
+Command:
+```bash
+time uv run --env-file .env python donkeydrone/torch_train.py \
+  --tubs=data/tub_3_26-05-09 \
+  --model=models/tub_3_26-05-09_full.pth \
+  --max-epochs=10 \
+  --batch-size=64 \
+  --no-model-summary
+```
+
+Training result:
+- Device: `mps`
+- Samples: `3368`
+- Train/val split: `2694/674`
+- Stopped after epoch `8/10` via early stopping.
+- Wall time: `5:03.97`
+- Saved checkpoint: `models/tub_3_26-05-09_full.pth` (`9.9M`)
+- Training log:
+  - Epoch 1: train `0.038359`, val `0.030147`, saved
+  - Epoch 2: train `0.014134`, val `0.005774`, saved
+  - Epoch 3: train `0.002000`, val `0.000912`, saved
+  - Epoch 4: train `0.001146`, val `0.002132`
+  - Epoch 5: train `0.001115`, val `0.001230`
+  - Epoch 6: train `0.000984`, val `0.000663`
+  - Epoch 7: train `0.000874`, val `0.000725`
+  - Epoch 8: train `0.000854`, val `0.000662`, early stop
+- Note: `torch_train.py` only saves when validation improves by more than `MIN_DELTA` (`0.0005`), so the saved checkpoint is from epoch 3 even though epoch 6/8 had slightly lower absolute validation loss.
+
+Quick evaluation on `data/tub_4_26-05-09`:
+```bash
+uv run --env-file .env python donkeydrone/evaluate.py \
+  --tubs=data/tub_4_26-05-09 \
+  --model=models/tub_3_26-05-09_full.pth \
+  --json-output=/private/tmp/tub3_full_eval_tub4.json
+```
+
+Evaluation result:
+- Samples: `161`
+- Missing IMU: `0`
+- Checkpoint kind: `control_feedback`
+- Equal-weight MAE score: `0.1712`
+- MAE: steering `0.0552`, throttle `0.1231`, altitude `0.3353`
+- RMSE: steering `0.0808`, throttle `0.2246`, altitude `0.5605`
+- Correlation: steering `0.7389`, throttle `0.9514`, altitude `0.3720`
+- This improves the tub 4 smoke score vs `models/hello_world_tub3.pth` (`0.2356`), but `tub_4` is still a small Xbox/control-biased smoke benchmark.
+
+Runtime load smoke:
+```bash
+uv run --env-file .env python - <<'PY'
+import numpy as np
+from donkeydrone.torch_pilot import TorchPilot
+pilot = TorchPilot(input_shape=(3, 240, 320), seq_len=3)
+pilot.load('models/tub_3_26-05-09_full.pth')
+print(tuple(round(float(v), 6) for v in pilot.run(np.zeros((240, 320, 3), dtype=np.uint8))))
+PY
+```
+
+Output:
+```text
+TorchPilot: loaded models/tub_3_26-05-09_full.pth on mps
+(0.219729, 0.90419, -0.069066)
+```
+
+Autopilot test command:
+```bash
+./scripts/start.sh --model=models/tub_3_26-05-09_full.pth --airframe=65mm
+```

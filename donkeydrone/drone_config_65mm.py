@@ -57,23 +57,23 @@ DRONE_HOVER_THROTTLE = 1490  # Recalibrate this using --mode=inflight-hover
 DRONE_THROTTLE_RANGE = 100  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
 # Apply quadratic scaling to altitude input: at high TWR, more throttle gives
 # disproportionate thrust. scale**2 = 1 gives linear; lower values gentler slope.
-DRONE_THROTTLE_SCALE = 0.5
+DRONE_THROTTLE_SCALE = 0.1
 DRONE_THROTTLE_STEP_SIZE = (
-    0.1  # keyboard step per keypress (deflection, snaps back to 0 on release)
+    0.2  # keyboard step per keypress (deflection, snaps back to 0 on release)
 )
 
 # Max yaw rate scaling (steering input maps to yaw)
-DRONE_MAX_YAW_RATE = 90.0
+DRONE_MAX_YAW_RATE = 180.0
 
 # Input sensitivity multiplier [0.0–1.0]: scales stick deflection sent to
 # BetaFlight. 1.0 = full deflection (±500 PWM from center on pitch/yaw);
 # 0.3 = gentler, easier-to-fly commands.
-DRONE_INPUT_SENSITIVITY = 0.5
+DRONE_INPUT_SENSITIVITY = 1.0
 
 # CH4 yaw deflection cap in PWM microseconds from center (1500). Yaw input at
 # hover PWM produces net upward thrust via motor-mixer ω² asymmetry — larger
 # deflections make the drone climb on every turn. Keep this small (20–40).
-DRONE_YAW_PWM_CAP = 75
+DRONE_YAW_PWM_CAP = 150
 
 # Yaw→throttle feed-forward (PWM step). When |steering| > ~0.01, CH3 is biased
 # down by exactly this many PWM (capped at -200) to cancel the upward thrust
@@ -111,7 +111,8 @@ DRONE_CAMERA_SOURCE = "gz_transport"
 # gz-transport camera topic (native macOS mode).
 # Must match the world name in your launch script. Run `gz topic -l | grep camera`
 # to confirm the topic on your setup.
-DRONE_GZ_CAMERA_TOPIC = "/world/drone_course_65mm/model/betaloop_drone_cam_65mm/link/camera_link/sensor/camera/image"
+#DRONE_GZ_CAMERA_TOPIC = "/world/drone_course_65mm/model/betaloop_drone_cam_65mm/link/camera_link/sensor/camera/image"
+DRONE_GZ_CAMERA_TOPIC = "/world/baylands_65mm/model/betaloop_drone_cam_65mm/link/camera_link/sensor/camera/image"
 
 # RTSP camera stream URL (Docker mode only -- used when DRONE_CAMERA_SOURCE = "rtsp")
 # DRONE_RTSP_URL = "rtsp://127.0.0.1:8554/live"

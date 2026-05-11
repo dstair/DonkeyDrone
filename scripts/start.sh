@@ -46,6 +46,7 @@ export GZ_IP=127.0.0.1
 
 # World to load — derived from --airframe, override with GZ_WORLD env var.
 GZ_WORLD="${GZ_WORLD:-drone_course_${AIRFRAME}}"
+export GZ_WORLD
 
 # Resource paths: project worlds + aeroloop_gazebo models (if present)
 AEROLOOP_DIR="${AEROLOOP_GAZEBO_DIR:-$HOME/dev/aeroloop_gazebo}"

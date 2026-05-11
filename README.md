@@ -256,6 +256,18 @@ macOS Host (Apple Silicon, ARM64)
 | `worlds/drone_course_65mm.sdf` | 65mm Air65 world (colored walls + Air65 model) |
 | `worlds/drone_course_85mm.sdf` | 85mm Flylens world (same course, 85mm model) |
 
+## Worlds for autopilot training
+
+All these .sdf files are in the worlds/ folder. They are provided to allow the CNN to train on different scenarios, but feel free to make your own.
+
+- forest_65mm: 
+- landing_target_65mm:
+- slalom_gates_65mm:
+- baylands: from px4
+
+GZ_WORLD=forest_65mm ./scripts/start.sh --airframe=65mm
+
+
 ## Troubleshooting
 
 ### BetaFlight SITL build
@@ -355,20 +367,18 @@ rm -rf data/tub_*
 
 ## TODO:
 
-of interest :
 X performance acceleration for training on M1 mac.
 X Switch drone flying from 2D to 3D. CNN predicts 3 outputs [steering, throttle, altitude].
 X Switch from PX4/MAVSDK to BetaFlight SITL for real-world tiny whoop transferability.
 X Build aeroloop_gazebo bridge plugin for ARM64 macOS
 X Create Gazebo drone model compatible with BetaFlight bridge (camera sensor attached)
 X swap out quadcopter type - in my planned build, can't see the rotors.
-- research improvements to CNN, though it already is quite impressive.
-  - proposal for VLA model and sending coordinates??
-- add/test input controller support.
+X research improvements to CNN. multimodal with IMU and control inputs; cross encoding; GLU
+X add/test input controller support.
 
 
 lower priority:
 - try a different world.
 - Add randomization of worlds (wall locations, colors) for better CNN training
-- Add looping to train CNN on a variety of worlds
+- Add looping to train model on a variety of worlds
 - research other tasks that would be interesting to implement (CNN to scan/build a 3D model of an object, for example)

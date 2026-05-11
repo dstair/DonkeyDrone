@@ -1,0 +1,83 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <world name="landing_target_65mm">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin name='gz::sim::systems::Physics' filename='gz-sim-physics-system'/>
+    <plugin name='gz::sim::systems::UserCommands' filename='gz-sim-user-commands-system'/>
+    <plugin name='gz::sim::systems::SceneBroadcaster' filename='gz-sim-scene-broadcaster-system'/>
+    <plugin name='gz::sim::systems::Sensors' filename='gz-sim-sensors-system'>
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin name='gz::sim::systems::Imu' filename='gz-sim-imu-system'/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+          <material><ambient>0.2 0.2 0.2 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Guidance Line (White Strip) -->
+    <model name="guidance_line">
+      <static>true</static>
+      <pose>10 0 0.01 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>20 0.2 0.001</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Landing Pad (Red Circle) -->
+    <model name="landing_pad">
+      <static>true</static>
+      <pose>20 0 0.01 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><cylinder><radius>1.5</radius><length>0.001</length></cylinder></geometry>
+          <material><ambient>1 0 0 1</ambient><diffuse>1 0 0 1</diffuse></material>
+        </visual>
+        <visual name="center_mark">
+          <pose>0 0 0.002 0 0 0</pose>
+          <geometry><box><size>0.5 0.5 0.001</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Starting Platform -->
+    <model name="start_platform">
+      <static>true</static>
+      <pose>0 0 0.01 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2 2 0.01</size></box></geometry>
+          <material><ambient>0 0 1 1</ambient><diffuse>0 0 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <include>
+      <uri>model://betaloop_drone_cam_65mm</uri>
+    </include>
+  </world>
+</sdf>

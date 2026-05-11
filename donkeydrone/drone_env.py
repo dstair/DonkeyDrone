@@ -20,11 +20,33 @@ def build_drone_env(
     if airframe is not None:
         gz_world = gz_world or os.environ.get("GZ_WORLD", f"drone_course_{airframe}")
         gz_model_name = gz_model_name or f"betaloop_drone_cam_{airframe}"
+    else:
+        gz_world = (
+            gz_world if gz_world is not None
+            else os.environ.get("GZ_WORLD")
+            or getattr(cfg, "GZ_WORLD", None)
+        )
+        gz_model_name = (
+            gz_model_name if gz_model_name is not None
+            else getattr(cfg, "DRONE_GZ_MODEL_NAME", None)
+        )
+        if gz_world and gz_model_name is None:
+            gz_model_name = (
+                "betaloop_drone_cam_85mm" if gz_world.endswith("85mm")
+                else "betaloop_drone_cam_65mm"
+            )
+    if gz_world and gz_model_name:
+        gz_camera_topic = (
+            f"/world/{gz_world}/model/{gz_model_name}"
+            "/link/camera_link/sensor/camera/image"
+        )
+    else:
+        gz_camera_topic = getattr(cfg, "DRONE_GZ_CAMERA_TOPIC", _GZ_CAMERA_TOPIC_DEFAULT)
     return DroneGymEnv(
         rc_host=getattr(cfg, "BETAFLIGHT_RC_HOST", "127.0.0.1"),
         rc_port=getattr(cfg, "BETAFLIGHT_RC_PORT", 9004),
         camera_source=getattr(cfg, "DRONE_CAMERA_SOURCE", "gz_transport"),
-        gz_camera_topic=getattr(cfg, "DRONE_GZ_CAMERA_TOPIC", _GZ_CAMERA_TOPIC_DEFAULT),
+        gz_camera_topic=gz_camera_topic,
         rtsp_url=getattr(cfg, "DRONE_RTSP_URL", "rtsp://127.0.0.1:8554/live"),
         max_pitch_angle=getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0),
         max_yaw_rate=getattr(cfg, "DRONE_MAX_YAW_RATE", 90.0),
@@ -63,10 +85,7 @@ def build_drone_env(
         record_imu=(
             getattr(cfg, "DRONE_RECORD_IMU", False) if record_imu is None else record_imu
         ),
-        gz_world=gz_world if gz_world is not None else getattr(cfg, "GZ_WORLD", None),
-        gz_model_name=(
-            gz_model_name if gz_model_name is not None
-            else getattr(cfg, "DRONE_GZ_MODEL_NAME", None)
-        ),
+        gz_world=gz_world,
+        gz_model_name=gz_model_name,
         gz_imu_topic=getattr(cfg, "DRONE_GZ_IMU_TOPIC", None),
     )

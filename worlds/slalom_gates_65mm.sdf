@@ -1,0 +1,74 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <world name="slalom_gates_65mm">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin name='gz::sim::systems::Physics' filename='gz-sim-physics-system'/>
+    <plugin name='gz::sim::systems::UserCommands' filename='gz-sim-user-commands-system'/>
+    <plugin name='gz::sim::systems::SceneBroadcaster' filename='gz-sim-scene-broadcaster-system'/>
+    <plugin name='gz::sim::systems::Sensors' filename='gz-sim-sensors-system'>
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin name='gz::sim::systems::Imu' filename='gz-sim-imu-system'/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry></collision>
+        <visual name="visual"><geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry><material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- Zig-zagging Gates -->
+    <model name="gate_1">
+      <static>true</static>
+      <pose>5 2 1.5 0 0 0.5</pose>
+      <link name="link">
+        <visual name="v1"><pose>0 -1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry><material><ambient>1 1 0 1</ambient></material></visual>
+        <visual name="v2"><pose>0 1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry><material><ambient>1 1 0 1</ambient></material></visual>
+        <visual name="v3"><pose>0 0 1.5 0 0 0</pose><geometry><box><size>0.1 2 0.1</size></box></geometry><material><ambient>1 1 0 1</ambient></material></visual>
+        <collision name="c1"><pose>0 -1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry></collision>
+        <collision name="c2"><pose>0 1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry></collision>
+      </link>
+    </model>
+
+    <model name="gate_2">
+      <static>true</static>
+      <pose>10 -2 1.5 0 0 -0.5</pose>
+      <link name="link">
+        <visual name="v1"><pose>0 -1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry><material><ambient>0 1 1 1</ambient></material></visual>
+        <visual name="v2"><pose>0 1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry><material><ambient>0 1 1 1</ambient></material></visual>
+        <visual name="v3"><pose>0 0 1.5 0 0 0</pose><geometry><box><size>0.1 2 0.1</size></box></geometry><material><ambient>0 1 1 1</ambient></material></visual>
+        <collision name="c1"><pose>0 -1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry></collision>
+        <collision name="c2"><pose>0 1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry></collision>
+      </link>
+    </model>
+
+    <model name="gate_3">
+      <static>true</static>
+      <pose>15 2 1.5 0 0 0.5</pose>
+      <link name="link">
+        <visual name="v1"><pose>0 -1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry><material><ambient>1 0 1 1</ambient></material></visual>
+        <visual name="v2"><pose>0 1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry><material><ambient>1 0 1 1</ambient></material></visual>
+        <visual name="v3"><pose>0 0 1.5 0 0 0</pose><geometry><box><size>0.1 2 0.1</size></box></geometry><material><ambient>1 0 1 1</ambient></material></visual>
+        <collision name="c1"><pose>0 -1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry></collision>
+        <collision name="c2"><pose>0 1 0 0 0 0</pose><geometry><box><size>0.1 0.1 3</size></box></geometry></collision>
+      </link>
+    </model>
+
+    <include>
+      <uri>model://betaloop_drone_cam_65mm</uri>
+    </include>
+  </world>
+</sdf>

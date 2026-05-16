@@ -22,9 +22,9 @@ CAMERA_TYPE = "MOCK"
 USE_FPV = True
 
 # Image resolution for the CNN pipeline (overrides DonkeyCar's 160x120 default).
-# The Gazebo sensor renders at 1280x960; drone_gym.py resizes to these dimensions.
-IMAGE_W = 320
-IMAGE_H = 240
+# The Gazebo camera model renders 640x480; use that natively in the pipeline.
+IMAGE_W = 640
+IMAGE_H = 480
 
 # ---- Drive Train ----
 # No physical actuators; DroneGymEnv sends RC commands via UDP

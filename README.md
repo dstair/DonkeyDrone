@@ -324,22 +324,23 @@ environment derives the camera topic from `GZ_WORLD` and the selected airframe.
 
 ### CNN Training size
 
-LinearModel is fully size-agnostic. The CNN uses Flatten() after convolutions, so it adapts to any input resolution. The only change needed is setting IMAGE_W and IMAGE_H in drone_config.py
+LinearModel is size-agnostic. The CNN now uses adaptive global pooling after
+the convolution stack, so model parameter count does not grow just because the
+input image is larger. The main change needed is setting `IMAGE_W` and
+`IMAGE_H` in the airframe config.
 
-At 640x480 the Dense(100) layer alone would have ~28M weights. At 720p it'd be ~85M. Training on a laptop would be noticeably slower.
+Higher resolutions can still slow training through JPEG decode, resize,
+transforms, memory bandwidth, and larger tub storage. Gazebo rendering cost
+also scales with the camera sensor pixel count.
 
 Trade-offs by resolution:
-  ┌───────────────────┬────────┬──────────────────┬───────────────┬───────────────────────────────┐
-  │    Resolution     │ Pixels │ CNN Flatten size │ Training cost │             Notes             │
-  ├───────────────────┼────────┼──────────────────┼───────────────┼───────────────────────────────┤
-  │ 160x120 (default) │ 19K    │ ~18K params      │ Baseline      │ DonkeyCar car default         │
-  ├───────────────────┼────────┼──────────────────┼───────────────┼───────────────────────────────┤
-  │ 320x240           │ 77K    │ ~73K params      │ ~4x           │ Good middle ground            │
-  ├───────────────────┼────────┼──────────────────┼───────────────┼───────────────────────────────┤
-  │ 640x480           │ 307K   │ ~277K params     │ ~15x          │ Rich detail, heavier training │
-  ├───────────────────┼────────┼──────────────────┼───────────────┼───────────────────────────────┤
-  │ 1280x720          │ 922K   │ ~850K params     │ ~47x          │ Native 720p, very heavy       │
-  └───────────────────┴────────┴──────────────────┴───────────────┴───────────────────────────────┘
+
+| Resolution | Pixels | Training cost | Notes |
+|------------|--------|---------------|-------|
+| 160x120 | 19K | Baseline | DonkeyCar car default |
+| 320x240 | 77K | Lower I/O | Previous DonkeyDrone default |
+| 640x480 | 307K | Moderate I/O | Current Gazebo sensor native |
+| 1280x720 | 922K | Heavy I/O/render | Useful for review/future data |
 
 #### Cleaning Up Data
 

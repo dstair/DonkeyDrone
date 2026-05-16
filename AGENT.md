@@ -263,7 +263,7 @@ Current useful local models:
 - `DRONE_MAX_ROLL_ANGLE`: max roll degrees for lateral bank. Defaults to pitch if omitted; values above pitch increase roll stick PWM relative to pitch.
 - `SIMULATED_DELAY_MS`: simulated camera delay in ms (0=off)
 - `MEASURE_LOOP_DELAY`: log vehicle loop timing stats
-- `IMAGE_W`/`IMAGE_H`: camera resolution for CNN pipeline (default 320×240)
+- `IMAGE_W`/`IMAGE_H`: camera resolution for CNN pipeline (default 640×480)
 - `DRIVE_LOOP_HZ`: vehicle loop frequency
 
 ## Flight Tuning: Throttle, PWM, Hover
@@ -1246,3 +1246,59 @@ Regression checks with angular `0.50`:
 ```
 - Peak `2.729 m/s`, final `0.736 m/s` after `6.6s`, drift `10.234m`, half-life `3.89s`.
 - This is close to the selected translational-drag result and keeps the lateral fix intact.
+
+## Current Handoff (2026-05-16 640x480 camera pipeline)
+
+Kicked off the 640x480 resolution project.
+
+Implementation:
+- `donkeydrone/drone_config_80mm.py`: `IMAGE_W = 640`, `IMAGE_H = 480`.
+- `donkeydrone/drone_config_65mm.py`: `IMAGE_W = 640`, `IMAGE_H = 480`.
+- External Gazebo camera SDFs already render `640x480` at 30Hz for both 65mm and 80mm, so no external SDF edit was needed.
+- `README.md` now documents that current `LinearModel` uses adaptive global pooling, so higher input resolution does not increase model parameter count, but it can increase render, JPEG decode, transform, memory, and tub-storage costs.
+
+Validation:
+```bash
+uv run --env-file .env python -m py_compile \
+  donkeydrone/drone_config_80mm.py donkeydrone/drone_config_65mm.py \
+  donkeydrone/drone_env.py donkeydrone/drone_gym.py \
+  donkeydrone/gz_camera_worker.py donkeydrone/torch_train.py \
+  donkeydrone/torch_model.py
+```
+- Passed.
+
+Bounded training probe on old/local tub resized to 640:
+```bash
+uv run --env-file .env python donkeydrone/torch_train.py \
+  --tubs=data/tub_12_26-05-16 \
+  --model=/private/tmp/donkeydrone_640_probe.pth \
+  --myconfig=drone_config_80mm.py \
+  --max-epochs=1 --max-samples=60 --batch-size=16 --no-model-summary
+```
+- MPS, 60 samples, 48 train / 12 val, one epoch: `4.8s`.
+
+Live headless collection check:
+```bash
+GZ_HEADLESS=1 ./scripts/start.sh --no-manage --airframe=80mm
+GZ_WORLD=baylands_80mm uv run --env-file .env python donkeydrone/autonomous_collect.py \
+  --airframe=80mm --duration=3 --warmup=1 --rate-hz=10 --ready-timeout=30
+bash ./scripts/stop_all.sh
+```
+- Required running outside sandbox because process-list/uv-cache access was restricted.
+- Camera worker logged nonblank frames: `shape=(480, 640, 3)`, `min=0 max=218 mean=106.1`.
+- Created `data/tub_14_26-05-16` with 30 images, tub size `596K`.
+- Sample recorded JPEG size verified as `(640, 480)`.
+
+Bounded training probe on newly recorded 640 tub:
+```bash
+uv run --env-file .env python donkeydrone/torch_train.py \
+  --tubs=data/tub_14_26-05-16 \
+  --model=/private/tmp/donkeydrone_tub14_640_probe.pth \
+  --myconfig=drone_config_80mm.py \
+  --max-epochs=1 --max-samples=28 --batch-size=8 --no-model-summary
+```
+- MPS, 28 samples, 22 train / 6 val, one epoch: `5.0s`.
+
+Notes:
+- First collector attempt subscribed to stale/default `/world/drone_course_80mm/...` while the running default world was `baylands_80mm`; setting `GZ_WORLD=baylands_80mm` fixed the topic.
+- 720p recording/downsample remains a separate follow-up. The current model can resize before training, but Gazebo render cost and JPEG I/O/storage should be measured separately.

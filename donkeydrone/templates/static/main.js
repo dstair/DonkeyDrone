@@ -21,6 +21,14 @@ var driveHandler = new function() {
             'pitch': 1500,
             'yaw': 1500,
             'throttle': 1000,
+            'arm': 1000,
+            'mode': 2000,
+        },
+        'bf': {
+            'armed': false,
+            'arming_flags': null,
+            'arming_disable_flags': '',
+            'active_modes': '',
         },
         'brakeOn': true,
         'recording': false,
@@ -56,6 +64,7 @@ var driveHandler = new function() {
       driveURL = '/drive'
       socket = new WebSocket('ws://' + location.host + '/wsDrive');
 
+      applyDroneTheme()
       injectRcPanel()
       setBindings()
 
@@ -243,6 +252,18 @@ var driveHandler = new function() {
       });
     }
 
+    var applyDroneTheme = function() {
+      if ($('#donkeydrone-theme').length) return;
+      var css = ''
+        + 'html, body { background:#000 !important; color:#eee !important; }'
+        + '.container, .container-fluid, .row, #content, #main, #drive, #control-bars {'
+        +   'background:#000 !important;'
+        + '}'
+        + 'label, .control-label, .form-check-label { color:#eee !important; }'
+        + 'a { color:#8ab4ff; }';
+      $('head').append('<style id="donkeydrone-theme">' + css + '</style>');
+    };
+
     var injectRcPanel = function() {
       if ($('#rc-panel').length) return;
       var html = ''
@@ -250,10 +271,16 @@ var driveHandler = new function() {
         +   'background:#222;color:#eee;border-radius:4px;'
         +   'font-family:monospace;font-size:14px;">'
         +   '<div style="font-weight:bold;margin-bottom:4px;">RC PWM (μs)</div>'
+        +   '<div style="margin-bottom:6px;">BetaFlight: <span id="bf-status" '
+        +     'style="font-weight:bold;">UNKNOWN</span></div>'
+        +   '<div>active modes: <span id="bf-active-modes">----</span></div>'
+        +   '<div>arming flags: <span id="bf-arming-flags">----</span></div>'
         +   '<div>roll (left/right): <span id="rc-roll">----</span></div>'
         +   '<div>pitch (fwd/back): <span id="rc-pitch">----</span></div>'
         +   '<div>yaw (turn):       <span id="rc-yaw">----</span></div>'
         +   '<div>throttle (motor): <span id="rc-throttle">----</span></div>'
+        +   '<div>arm aux:          <span id="rc-arm">----</span></div>'
+        +   '<div>mode aux:         <span id="rc-mode">----</span></div>'
         + '</div>';
       var anchor = $('#control-bars');
       if (anchor.length) {
@@ -268,6 +295,19 @@ var driveHandler = new function() {
       $('#rc-pitch').text(state.rc.pitch);
       $('#rc-yaw').text(state.rc.yaw);
       $('#rc-throttle').text(state.rc.throttle);
+      $('#rc-arm').text(state.rc.arm);
+      $('#rc-mode').text(state.rc.mode);
+
+      var status = state.bf.armed ? 'ARMED' : 'DISARMED';
+      $('#bf-status')
+        .text(status)
+        .css('color', state.bf.armed ? '#6ee779' : '#ff7070');
+      $('#bf-active-modes').text(state.bf.active_modes || '----');
+      var flags = state.bf.arming_disable_flags || '';
+      if (!flags && state.bf.arming_flags === 0) {
+        flags = 'none';
+      }
+      $('#bf-arming-flags').text(flags || '----');
     };
 
     var updateUI = function() {

@@ -8,10 +8,10 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # --no-manage: bring up Gazebo + BetaFlight SITL but skip drone_manage.py.
 #   Useful for test_thrust.py or any tool that needs the sim running without
 #   drone_manage fighting over RC UDP port 9004.
-# --airframe=65mm|85mm: which drone model + config + world to load.
-#   Default is 65mm (BetaFPV Air65). Use 85mm for the FlyWoo Flylens profile.
+# --airframe=65mm|80mm: which drone model + config + world to load.
+#   Default is 80mm (Pavo Pico II). Use 65mm for the BetaFPV Air65 profile.
 SKIP_MANAGE=0
-AIRFRAME="65mm"
+AIRFRAME="80mm"
 USE_XBOX=0
 MANAGE_ARGS=()
 for arg in "$@"; do
@@ -32,8 +32,8 @@ for arg in "$@"; do
     esac
 done
 
-if [ "$AIRFRAME" != "65mm" ] && [ "$AIRFRAME" != "85mm" ]; then
-    echo "error: --airframe must be 65mm or 85mm (got: $AIRFRAME)" >&2
+if [ "$AIRFRAME" != "65mm" ] && [ "$AIRFRAME" != "80mm" ]; then
+    echo "error: --airframe must be 65mm or 80mm (got: $AIRFRAME)" >&2
     exit 1
 fi
 
@@ -44,8 +44,13 @@ DRONE_CONFIG="drone_config_${AIRFRAME}.py"
 export PATH="/opt/homebrew/opt/ruby/bin:/opt/homebrew/bin:$PATH"
 export GZ_IP=127.0.0.1
 
-# World to load — derived from --airframe, override with GZ_WORLD env var.
-GZ_WORLD="${GZ_WORLD:-drone_course_${AIRFRAME}}"
+# World to load — defaults to Baylands for the default 80mm profile, otherwise
+# the matching drone_course. Override with GZ_WORLD env var.
+DEFAULT_WORLD="drone_course_${AIRFRAME}"
+if [ "$AIRFRAME" = "80mm" ]; then
+    DEFAULT_WORLD="baylands_80mm"
+fi
+GZ_WORLD="${GZ_WORLD:-$DEFAULT_WORLD}"
 export GZ_WORLD
 
 # Resource paths: project worlds + aeroloop_gazebo models (if present)
@@ -199,7 +204,7 @@ s = connect_msp()
 
 # Disable AIRMODE feature if enabled. AIRMODE re-scales the motor mix so
 # yaw/attitude commands retain authority at low throttle — which on our
-# 125g airframe causes the drone to climb on yaw input even at CH3=1000.
+# 53.7g airframe causes the drone to climb on yaw input even at CH3=1000.
 # Feature changes require eeprom save + reboot to take effect.
 FEATURE_AIRMODE = 1 << 22
 feat = msp_send(s, 36)  # MSP_FEATURE_CONFIG
@@ -247,15 +252,13 @@ def cli_drain(sock, timeout=0.5, match=None):
     return buf
 
 # Lower the yaw PID gains. BF's stock PIDs are tuned for 5\" racing quads;
-# on our 125g 85mm airframe the yaw loop saturates on any non-zero stick
+# on our small whoop airframes the yaw loop saturates on any non-zero stick
 # deflection, producing a step-function motor asymmetry that lifts the
 # drone ~20m on every turn (see --mode=yaw-airborne test). Reducing P/I/D/F
 # restores proportional response.
 #
-# 65mm Air65 (~31g) has 4x less mass and rotational inertia than the 85mm
-# Flylens (~125g), so the same gains produce 4x the motor differential
-# per stick deg → yaw-induced roll/pitch the angle loop can't catch.
-# Scale the gains down ~4x for 65mm.
+# The 65mm Air65 has lower mass and inertia than the 80mm Pavo Pico II, so
+# keep the 65mm yaw gains especially low.
 if AIRFRAME == '65mm':
     YAW_PID = {'p_yaw': '5', 'i_yaw': '2', 'd_yaw': '0', 'f_yaw': '5'}
 else:

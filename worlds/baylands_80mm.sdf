@@ -1,6 +1,6 @@
 <?xml version="1.0" ?>
 <sdf version="1.9">
-  <world name="baylands_65mm">
+  <world name="baylands_80mm">
     <physics name="1ms" type="ignored">
       <max_step_size>0.001</max_step_size>
       <real_time_factor>1.0</real_time_factor>
@@ -54,7 +54,7 @@
     </include>
 
     <include>
-      <uri>model://betaloop_drone_cam_65mm</uri>
+      <uri>model://betaloop_drone_cam_80mm</uri>
       <!-- Start slightly elevated to avoid terrain collision -->
       <pose>0 0 0.5 0 0 0</pose>
     </include>

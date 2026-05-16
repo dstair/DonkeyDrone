@@ -32,7 +32,7 @@ def build_drone_env(
         )
         if gz_world and gz_model_name is None:
             gz_model_name = (
-                "betaloop_drone_cam_85mm" if gz_world.endswith("85mm")
+                "betaloop_drone_cam_80mm" if gz_world.endswith("80mm")
                 else "betaloop_drone_cam_65mm"
             )
     if gz_world and gz_model_name:
@@ -49,6 +49,11 @@ def build_drone_env(
         gz_camera_topic=gz_camera_topic,
         rtsp_url=getattr(cfg, "DRONE_RTSP_URL", "rtsp://127.0.0.1:8554/live"),
         max_pitch_angle=getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0),
+        max_roll_angle=getattr(
+            cfg,
+            "DRONE_MAX_ROLL_ANGLE",
+            getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0),
+        ),
         max_yaw_rate=getattr(cfg, "DRONE_MAX_YAW_RATE", 90.0),
         hover_throttle=getattr(cfg, "DRONE_HOVER_THROTTLE", 1500),
         throttle_range=getattr(cfg, "DRONE_THROTTLE_RANGE", 300),

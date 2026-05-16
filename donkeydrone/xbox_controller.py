@@ -26,8 +26,7 @@ Stick mapping:
 Buttons / triggers:
     A → toggle `recording`
     B → cycle `user/mode` through user → local_angle → local
-    RT → deadman arm switch — held past `arm_threshold` = armed,
-         released = disarmed.
+    RT → toggle arm on rising edge past `arm_threshold`.
 
 Wire this in alongside LocalWebController; because it is added after the web
 controller in the Vehicle's part list, its outputs overwrite the web values
@@ -92,6 +91,7 @@ class XboxDroneController:
         self._mode_idx = 0
         self._prev_a = False
         self._prev_b = False
+        self._prev_rt = False
         self._prev_armed_logged = None
         self._tick = 0
         self._ticks_since_frame = _STALE_TICK_THRESHOLD + 1
@@ -168,6 +168,7 @@ class XboxDroneController:
             self.armed = False
             self._prev_a = False
             self._prev_b = False
+            self._prev_rt = False
             if self._tick % 90 == 0:
                 if stale:
                     logger.warning(
@@ -205,16 +206,16 @@ class XboxDroneController:
             min(1.0, self._apply_deadzone(lY) * self.altitude_scale),
         )
 
-        # Right trigger: 0..1, deadman arm.
-        self.armed = rT > self.arm_threshold
-        if self.armed != self._prev_armed_logged:
+        rt_pressed = rT > self.arm_threshold
+        if rt_pressed and not self._prev_rt:
+            self.armed = not self.armed
             logger.info(
-                "xbox: armed=%s (RT=%.2f threshold=%.2f)",
+                "xbox: armed=%s (RT toggle, value=%.2f threshold=%.2f)",
                 self.armed,
                 rT,
                 self.arm_threshold,
             )
-            self._prev_armed_logged = self.armed
+        self._prev_rt = rt_pressed
 
         if btn_a and not self._prev_a:
             self.recording = not self.recording

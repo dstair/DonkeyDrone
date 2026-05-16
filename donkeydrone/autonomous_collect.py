@@ -111,6 +111,7 @@ def collect(cfg, args):
     period = 1.0 / float(args.rate_hz)
     records = 0
     blank_frames = 0
+    telemetry_count = 15
 
     try:
         print(f"Waiting for collector readiness (timeout {args.ready_timeout:.1f}s)...")
@@ -134,7 +135,7 @@ def collect(cfg, args):
             steering, throttle, roll, altitude = _flight_command(t)
             env_outputs = env.run_threaded(steering, throttle, roll, altitude)
             image = env_outputs[0]
-            telemetry = env_outputs[5:]
+            telemetry = env_outputs[7 : 7 + telemetry_count]
             if not np.any(image):
                 blank_frames += 1
             tub_writer.run(
@@ -168,7 +169,7 @@ def collect(cfg, args):
 
 def main():
     parser = argparse.ArgumentParser(description="Collect scripted DonkeyDrone tub data")
-    parser.add_argument("--airframe", choices=["65mm", "85mm"], default="65mm")
+    parser.add_argument("--airframe", choices=["65mm", "80mm"], default="65mm")
     parser.add_argument("--myconfig", default=None)
     parser.add_argument("--duration", type=float, default=30.0)
     parser.add_argument("--warmup", type=float, default=8.0)

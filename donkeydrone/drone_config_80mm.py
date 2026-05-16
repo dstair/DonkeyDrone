@@ -2,9 +2,9 @@
 # DRONE CONFIG
 #
 # Configuration overrides for flying a drone in BetaFlight SITL + Gazebo simulator.
-# Use with: python drone_manage.py drive --myconfig=drone_config_85mm.py
-#   (FlyWoo Flylens 85mm profile, ~125g AUW, 85mm wheelbase)
-#   https://flywoo.net/products/flylens-85-hd-o4-2s-whoop-fpv-drone
+# Use with: python drone_manage.py drive --myconfig=drone_config_80mm.py
+#   (BETAFPV Pavo Pico II O4 profile, 79g with selected battery, 80mm wheelbase)
+#   https://betafpv.com/products/pavo-pico-ii-brushless-whoop-quadcopter
 # The drone uses the same DonkeyCar pipeline as a car, with a different
 # semantic mapping (BetaFlight Angle mode):
 #   steering [-1, 1]  ->  yaw rate
@@ -44,17 +44,19 @@ BETAFLIGHT_ARM_CHANNEL = 4  # AUX1 (0-indexed)
 BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 
 # ---- Flight Control Mapping (Angle mode) ----
-DRONE_MAX_PITCH_ANGLE = 25.0  # max pitch degrees (throttle input maps to pitch)
-DRONE_HOVER_THROTTLE = 1497  # PWM that produces hover thrust (altitude=0). Measured via `test_thrust.sh --mode=hover`.
+DRONE_MAX_PITCH_ANGLE = 45.0  # max pitch degrees (throttle input maps to pitch)
+DRONE_MAX_ROLL_ANGLE = 45.0  # max roll degrees (roll input maps to lateral bank)
+DRONE_HOVER_THROTTLE = 1475  # Calibrated at 79g AUW with test_thrust damper-sim.
 DRONE_THROTTLE_RANGE = (
-    20  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
+    100  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
 )
+DRONE_THROTTLE_SCALE = 0.2
 DRONE_THROTTLE_STEP_SIZE = (
     0.1  # keyboard step per keypress (deflection, snaps back to 0 on release)
 )
 
 # Max yaw rate scaling (steering input maps to yaw)
-DRONE_MAX_YAW_RATE = 90.0
+DRONE_MAX_YAW_RATE = 270.0
 
 
 DRONE_ANGLE_MODE=True # this appears to always set to Acro mode regardless of True/FLse
@@ -91,7 +93,7 @@ DRONE_CAMERA_SOURCE = "gz_transport"
 # gz-transport camera topic (native macOS mode).
 # Must match the world name in your launch script. Run `gz topic -l | grep camera`
 # to confirm the topic on your setup.
-DRONE_GZ_CAMERA_TOPIC = "/world/drone_course_85mm/model/betaloop_drone_cam_85mm/link/camera_link/sensor/camera/image"
+DRONE_GZ_CAMERA_TOPIC = "/world/baylands_80mm/model/betaloop_drone_cam_80mm/link/camera_link/sensor/camera/image"
 
 # RTSP camera stream URL (Docker mode only -- used when DRONE_CAMERA_SOURCE = "rtsp")
 # DRONE_RTSP_URL = "rtsp://127.0.0.1:8554/live"

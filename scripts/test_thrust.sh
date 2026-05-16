@@ -3,7 +3,7 @@
 # run donkeydrone/test_thrust.py, then tear down.
 #
 # Usage:
-#     ./scripts/test_thrust.sh [--airframe=65mm|85mm] [test_thrust.py args...]
+#     ./scripts/test_thrust.sh [--airframe=65mm|80mm] [test_thrust.py args...]
 #
 # --airframe is forwarded to start.sh and also exported as GZ_WORLD so
 # test_thrust.py subscribes to the right pose topic. All other args are
@@ -16,7 +16,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
-AIRFRAME="65mm"
+AIRFRAME="80mm"
 TEST_ARGS=()
 for arg in "$@"; do
     case "$arg" in
@@ -29,7 +29,13 @@ for arg in "$@"; do
     esac
 done
 
-export GZ_WORLD="drone_course_${AIRFRAME}"
+if [ -z "${GZ_WORLD:-}" ]; then
+    GZ_WORLD="drone_course_${AIRFRAME}"
+    if [ "$AIRFRAME" = "80mm" ]; then
+        GZ_WORLD="baylands_80mm"
+    fi
+    export GZ_WORLD
+fi
 
 STACK_LOG="$LOG_DIR/start_no_manage.log"
 > "$STACK_LOG"

@@ -2,7 +2,7 @@
 # Start the sim stack, fly a scripted collection pass, then train on the new tub.
 #
 # Usage:
-#   ./scripts/collect_train.sh [--airframe=65mm|85mm] [--duration=30] [--model=models/scripted.pth] [--max-epochs=5]
+#   ./scripts/collect_train.sh [--airframe=65mm|80mm] [--duration=30] [--model=models/scripted.pth] [--max-epochs=5]
 
 set -euo pipefail
 
@@ -11,7 +11,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
-AIRFRAME="65mm"
+AIRFRAME="80mm"
 DURATION="30"
 WARMUP="8"
 RATE_HZ="30"
@@ -33,12 +33,18 @@ for arg in "$@"; do
     esac
 done
 
-if [ "$AIRFRAME" != "65mm" ] && [ "$AIRFRAME" != "85mm" ]; then
-    echo "error: --airframe must be 65mm or 85mm (got: $AIRFRAME)" >&2
+if [ "$AIRFRAME" != "65mm" ] && [ "$AIRFRAME" != "80mm" ]; then
+    echo "error: --airframe must be 65mm or 80mm (got: $AIRFRAME)" >&2
     exit 1
 fi
 
-export GZ_WORLD="drone_course_${AIRFRAME}"
+if [ -z "${GZ_WORLD:-}" ]; then
+    GZ_WORLD="drone_course_${AIRFRAME}"
+    if [ "$AIRFRAME" = "80mm" ]; then
+        GZ_WORLD="baylands_80mm"
+    fi
+    export GZ_WORLD
+fi
 
 STACK_LOG="$LOG_DIR/collect_train_stack.log"
 COLLECT_LOG="$LOG_DIR/collect_train_collect.log"

@@ -128,11 +128,12 @@ uv run --env-file .env python -c "import gz.transport13; print('OK')"
 
 `scripts/start.sh` launches Gazebo and BetaFlight SITL in the background, waits
 for readiness, then runs `donkeydrone/drone_manage.py` in the foreground. Ctrl+C
-stops everything cleanly (no orphan processes).
+stops everything.
 
 ```bash
-./scripts/start.sh                              # manual drive mode to collect training data
-./scripts/start.sh --model=models/pilot.pth     # launch with autopilot
+./scripts/start.sh                                               # manual drive mode to collect training data
+GZ_WORLD=forest_80mm ./scripts/start.sh --xbox                   # example of optional parameters
+./scripts/start.sh --model=models/pilot.pth                      # launch with autopilot
 ```
 
 Logs are written to `logs/gazebo.log` and `logs/betaflight.log`.
@@ -140,14 +141,14 @@ Logs are written to `logs/gazebo.log` and `logs/betaflight.log`.
 Then open http://127.0.0.1:8887
 
 **What `scripts/start.sh` does:**
-1. Launches Gazebo with the drone course world
+1. Launches Gazebo with the selected world
 2. Waits for the camera topic to appear
 3. Launches BetaFlight SITL
 4. Runs `donkeydrone/drone_manage.py` which starts the Web UI and sends RC packets
 5. On exit or Ctrl+C, calls `scripts/stop_all.sh` to kill all processes cleanly
 
 **Environment variables** for customization:
-- `GZ_WORLD` — Gazebo world name (default: `drone_course_65mm`; derived from `--airframe`)
+- `GZ_WORLD` — Gazebo world name (default: `baylands_80mm` for the default 80mm airframe)
 - `BETAFLIGHT_SITL_BIN` — path to BetaFlight SITL binary (default: `~/dev/betaflight/obj/main/betaflight_SITL.elf`)
 - `AEROLOOP_GAZEBO_DIR` — path to aeroloop_gazebo install (default: `~/dev/aeroloop_gazebo`)
 
@@ -196,7 +197,7 @@ In the Web UI, switch to "local_angle" or "local" mode.
 
 ## Configuration
 
-Two airframe configs are maintained side-by-side. Pick one with `--airframe=65mm|85mm` on `start.sh` (default `65mm`, the BetaFPV Air65). Edit the matching `donkeydrone/drone_config_XXmm.py` to adjust parameters:
+Two airframe configs are maintained side-by-side. Pick one with `--airframe=65mm|80mm` on `start.sh` (default `80mm`, the Pavo Pico II). Edit the matching `donkeydrone/drone_config_XXmm.py` to adjust parameters:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -206,6 +207,7 @@ Two airframe configs are maintained side-by-side. Pick one with `--airframe=65mm
 | `DRONE_HOVER_THROTTLE` | 1500 | PWM midpoint for hover |
 | `DRONE_THROTTLE_RANGE` | 300 | altitude [-1,1] maps to hover ± this PWM range |
 | `DRONE_MAX_PITCH_ANGLE` | 25.0 | Max forward pitch angle (degrees) |
+| `DRONE_MAX_ROLL_ANGLE` | pitch angle | Max lateral roll angle (degrees) |
 | `DRONE_MAX_YAW_RATE` | 90.0 | Max yaw rate (deg/s) at full steering |
 | `SIMULATED_DELAY_MS` | 0 | Simulated camera delay in ms (0=off) |
 | `MEASURE_LOOP_DELAY` | True | Log vehicle loop timing stats |
@@ -247,25 +249,28 @@ macOS Host (Apple Silicon, ARM64)
 | `scripts/stop_all.sh`     | Kills all BetaFlight/Gazebo processes |
 | `donkeydrone/drone_manage.py` | Main entry point (replaces `manage.py` for drone use) |
 | `donkeydrone/drone_gym.py`    | DroneGymEnv part: BetaFlight RC UDP + gz-transport camera bridge |
-| `donkeydrone/drone_config_65mm.py` | BetaFPV Air65 config (default airframe) |
-| `donkeydrone/drone_config_85mm.py` | FlyWoo Flylens 85mm config (alternate airframe) |
+| `donkeydrone/drone_config_80mm.py` | Pavo Pico II 80mm, 79g AUW config (default airframe) |
+| `donkeydrone/drone_config_65mm.py` | BetaFPV Air65 config (alternate airframe) |
 | `donkeydrone/config.py`       | Base DonkeyCar config (shared, not modified) |
 | `donkeydrone/torch_model.py`  | CNN architecture (LinearModel, PyTorch) |
 | `donkeydrone/torch_pilot.py`  | Inference wrapper for vehicle loop |
 | `donkeydrone/torch_train.py`  | Training script |
 | `worlds/drone_course_65mm.sdf` | 65mm Air65 world (colored walls + Air65 model) |
-| `worlds/drone_course_85mm.sdf` | 85mm Flylens world (same course, 85mm model) |
+| `worlds/drone_course_80mm.sdf` | 80mm Pavo Pico II world (same course, 80mm model) |
+| `worlds/baylands_80mm.sdf` | Default 80mm Baylands world |
 
 ## Worlds for autopilot training
 
 All these .sdf files are in the worlds/ folder. They are provided to allow the CNN to train on different scenarios, but feel free to make your own.
 
-- forest_65mm: 
-- landing_target_65mm:
-- slalom_gates_65mm:
-- baylands: from px4
+- baylands_80mm: default world, based on Gazebo Fuel Baylands
+- forest_80mm
+- landing_target_80mm
+- slalom_gates_80mm
+- drone_course_80mm
+- drone_course_65mm: retained Air65 course world
 
-GZ_WORLD=forest_65mm ./scripts/start.sh --airframe=65mm
+GZ_WORLD=forest_80mm ./scripts/start.sh
 
 
 ## Troubleshooting
@@ -311,11 +316,11 @@ ARM64 Gazebo libraries.
 
 #### Worlds
 
-The default world is **`drone_course`** (`worlds/drone_course.sdf` in this repo).
-It provides high-contrast colored surfaces.
+The default world is **`baylands_80mm`**. The retained `drone_course_65mm`
+world provides a 65mm Air65 course; the other included worlds are 80mm worlds.
 
-To switch worlds, set `GZ_WORLD=<world>` when running `start.sh` **and** update
-`DRONE_GZ_CAMERA_TOPIC` in `donkeydrone/drone_config.py` to match.
+To switch worlds, set `GZ_WORLD=<world>` when running `start.sh`. The drone
+environment derives the camera topic from `GZ_WORLD` and the selected airframe.
 
 ### CNN Training size
 
@@ -376,8 +381,17 @@ X swap out quadcopter type - in my planned build, can't see the rotors.
 X research improvements to CNN. multimodal with IMU and control inputs; cross encoding; GLU
 X add/test input controller support.
 X try a different world.
-- add roll for better handling.
-- add an 80mm size that matches the Pavo Pico II
+X add roll for better handling.
+X add an 80mm size that matches the Pavo Pico II
+
+X with battery, 79g.
+X worlds - all 80 mm
+
+- clean up the UI. Want to show pitch, roll, yaw, and throttle.
+  - add status indicator, i.e. ARMED
+- black background for donkeydrone UI
+
+
 - Add randomization of worlds (wall locations, colors) for better CNN training
 - Add looping to train model on a variety of worlds
 - research other tasks that would be interesting to implement (CNN to scan/build a 3D model of an object, for example)

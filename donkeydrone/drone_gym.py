@@ -73,6 +73,7 @@ class DroneGymEnv:
         gz_camera_topic=_GZ_CAMERA_TOPIC_DEFAULT,
         rtsp_url="rtsp://127.0.0.1:8554/live",
         max_pitch_angle=25.0,
+        max_roll_angle=None,
         max_yaw_rate=90.0,
         hover_throttle=1500,
         throttle_range=300,
@@ -104,7 +105,10 @@ class DroneGymEnv:
         self.camera_source = camera_source
         self.gz_camera_topic = gz_camera_topic
         self.rtsp_url = rtsp_url
-        self.max_pitch_angle = max_pitch_angle
+        self.max_pitch_angle = float(max_pitch_angle)
+        self.max_roll_angle = (
+            self.max_pitch_angle if max_roll_angle is None else float(max_roll_angle)
+        )
         self.max_yaw_rate = max_yaw_rate
         self.hover_throttle = hover_throttle
         self.throttle_range = throttle_range
@@ -136,7 +140,7 @@ class DroneGymEnv:
         self.record_imu = record_imu
         self.gz_world = gz_world or os.environ.get("GZ_WORLD", "drone_course_65mm")
         self.gz_model_name = gz_model_name or (
-            "betaloop_drone_cam_85mm" if self.gz_world.endswith("85mm")
+            "betaloop_drone_cam_80mm" if self.gz_world.endswith("80mm")
             else "betaloop_drone_cam_65mm"
         )
         self.gz_imu_topic = gz_imu_topic
@@ -157,6 +161,10 @@ class DroneGymEnv:
         self.last_throttle_pwm = 1000
         self.last_arm_pwm = 1000
         self.last_mode_pwm = 2000 if self.angle_mode else 1000
+        self.bf_armed = False
+        self.bf_arming_flags = None
+        self.bf_arming_disable_flags = []
+        self.bf_active_modes = []
         self.frame = np.zeros((image_h, image_w, 3), dtype=np.uint8)
         self.position = (0.0, 0.0, 0.0)
         self.attitude = (0.0, 0.0, 0.0)
@@ -316,7 +324,7 @@ class DroneGymEnv:
         """Convert yaw/pitch/roll/altitude [-1,1] to 16 RC PWM channels [1000-2000].
 
         BetaFlight Angle mode channel mapping:
-            CH1 (roll):     1500 + roll * 500 * sensitivity
+            CH1 (roll):     1500 + roll * 500 * sensitivity * roll/pitch angle ratio
             CH2 (pitch):    1500 + throttle * 500 * sensitivity (forward tilt)
             CH3 (throttle): bipolar — altitude in [-1,1] → hover_throttle ± throttle_range.
                             altitude=0 → hover PWM (drone holds altitude in sim where
@@ -330,15 +338,19 @@ class DroneGymEnv:
         """
         channels = [1000] * 16
 
-        # Sensitivity scales roll/pitch stick deflection.
-        deflection = 500 * self.input_sensitivity
+        # Sensitivity scales pitch stick deflection. Roll can be tuned
+        # independently as an angle ratio while preserving existing behavior
+        # when max_roll_angle == max_pitch_angle.
+        pitch_deflection = 500 * self.input_sensitivity
+        roll_angle_ratio = self.max_roll_angle / max(1.0, self.max_pitch_angle)
+        roll_deflection = pitch_deflection * roll_angle_ratio
 
         # CH1: roll (lateral bank)
         roll = max(-1.0, min(1.0, self.roll))
-        channels[0] = int(max(1000, min(2000, 1500 + roll * deflection)))
+        channels[0] = int(max(1000, min(2000, 1500 + roll * roll_deflection)))
 
         # CH2: pitch (forward tilt from throttle input)
-        channels[1] = int(max(1000, min(2000, 1500 + self.throttle * deflection)))
+        channels[1] = int(max(1000, min(2000, 1500 + self.throttle * pitch_deflection)))
 
         # CH3: motor throttle — bipolar around hover.
         alt = max(-1.0, min(1.0, self.altitude))
@@ -484,6 +496,16 @@ class DroneGymEnv:
                 except OSError:
                     pass
 
+    def _update_bf_status(self, flags, active_arming, active_modes):
+        if flags is None and not active_modes:
+            return
+        if flags is not None:
+            self.bf_arming_flags = int(flags)
+            self.bf_arming_disable_flags = list(active_arming or [])
+        if active_modes is not None:
+            self.bf_active_modes = list(active_modes or [])
+            self.bf_armed = "ARM" in self.bf_active_modes
+
     def _betaflight_loop(self):
         """Main control loop: arm BetaFlight and send RC commands at 50Hz.
 
@@ -534,6 +556,7 @@ class DroneGymEnv:
             flags, active_arming, mode_bits, active_modes = (
                 self._query_arming_flags()
             )
+            self._update_bf_status(flags, active_arming, active_modes)
             if flags is None:
                 logger.warning(
                     "Arm attempt %d: MSP query failed; assuming BF unreachable",
@@ -590,6 +613,11 @@ class DroneGymEnv:
 
             # Log control values every ~2s
             loop_count += 1
+            if loop_count % 50 == 0:
+                flags, active_arming, _mode_bits, active_modes = (
+                    self._query_arming_flags(timeout=0.05)
+                )
+                self._update_bf_status(flags, active_arming, active_modes)
             if loop_count % 100 == 0:
                 logger.info(
                     "rc: yaw=%.2f pitch=%.2f roll=%.2f alt=%.2f mode=%s → "
@@ -753,6 +781,8 @@ class DroneGymEnv:
             self.last_pitch_pwm,
             self.last_yaw_pwm,
             self.last_throttle_pwm,
+            self.last_arm_pwm,
+            self.last_mode_pwm,
         ]
 
         if self.record_position:
@@ -770,6 +800,13 @@ class DroneGymEnv:
                 self.imu[4],
                 self.imu[5],
             ]
+
+        outputs += [
+            self.bf_armed,
+            self.bf_arming_flags,
+            ",".join(self.bf_arming_disable_flags),
+            ",".join(self.bf_active_modes),
+        ]
 
         return outputs
 

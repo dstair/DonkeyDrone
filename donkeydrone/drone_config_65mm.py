@@ -53,6 +53,7 @@ BETAFLIGHT_MODE_CHANNEL = 5  # AUX2
 DRONE_ANGLE_MODE = True
 
 DRONE_MAX_PITCH_ANGLE = 45.0  # max pitch degrees (throttle input maps to pitch)
+DRONE_MAX_ROLL_ANGLE = 45.0  # max roll degrees (roll input maps to lateral bank)
 DRONE_HOVER_THROTTLE = 1490  # Recalibrate this using --mode=inflight-hover
 DRONE_THROTTLE_RANGE = 100  # altitude=±1 maps to hover ± range (clamped to [1000, 2000])
 # Apply quadratic scaling to altitude input: at high TWR, more throttle gives
@@ -111,8 +112,7 @@ DRONE_CAMERA_SOURCE = "gz_transport"
 # gz-transport camera topic (native macOS mode).
 # Must match the world name in your launch script. Run `gz topic -l | grep camera`
 # to confirm the topic on your setup.
-#DRONE_GZ_CAMERA_TOPIC = "/world/drone_course_65mm/model/betaloop_drone_cam_65mm/link/camera_link/sensor/camera/image"
-DRONE_GZ_CAMERA_TOPIC = "/world/baylands_65mm/model/betaloop_drone_cam_65mm/link/camera_link/sensor/camera/image"
+DRONE_GZ_CAMERA_TOPIC = "/world/drone_course_65mm/model/betaloop_drone_cam_65mm/link/camera_link/sensor/camera/image"
 
 # RTSP camera stream URL (Docker mode only -- used when DRONE_CAMERA_SOURCE = "rtsp")
 # DRONE_RTSP_URL = "rtsp://127.0.0.1:8554/live"

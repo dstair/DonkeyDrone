@@ -132,7 +132,20 @@ class LocalWebController(_LocalWebController):
             # Insert before donkeycar's /static/ rule so we match first.
             self.default_router.rules.insert(0, spec)
 
-        self._last_rc = {"roll": None, "pitch": None, "yaw": None, "throttle": None}
+        self._last_rc = {
+            "roll": None,
+            "pitch": None,
+            "yaw": None,
+            "throttle": None,
+            "arm": None,
+            "mode": None,
+        }
+        self._last_bf = {
+            "armed": None,
+            "arming_flags": None,
+            "arming_disable_flags": None,
+            "active_modes": None,
+        }
 
     def run_threaded(
         self,
@@ -144,6 +157,12 @@ class LocalWebController(_LocalWebController):
         rc_pitch=None,
         rc_yaw=None,
         rc_throttle=None,
+        rc_arm=None,
+        rc_mode=None,
+        bf_armed=None,
+        bf_arming_flags=None,
+        bf_arming_disable_flags=None,
+        bf_active_modes=None,
     ):
         result = super().run_threaded(
             img_arr=img_arr,
@@ -159,6 +178,8 @@ class LocalWebController(_LocalWebController):
             ("pitch", rc_pitch),
             ("yaw", rc_yaw),
             ("throttle", rc_throttle),
+            ("arm", rc_arm),
+            ("mode", rc_mode),
         ):
             if val is None:
                 continue
@@ -169,6 +190,20 @@ class LocalWebController(_LocalWebController):
 
         if rc_changes and self.loop is not None:
             self.loop.add_callback(lambda: self.update_wsclients({"rc": rc_changes}))
+
+        bf_values = {
+            "armed": bool(bf_armed) if bf_armed is not None else None,
+            "arming_flags": bf_arming_flags,
+            "arming_disable_flags": bf_arming_disable_flags or "",
+            "active_modes": bf_active_modes or "",
+        }
+        bf_changes = {}
+        for key, val in bf_values.items():
+            if self._last_bf[key] != val:
+                self._last_bf[key] = val
+                bf_changes[key] = val
+        if bf_changes and self.loop is not None:
+            self.loop.add_callback(lambda: self.update_wsclients({"bf": bf_changes}))
 
         angle, throttle, altitude, mode, recording, buttons = result
         return angle, throttle, self.roll, altitude, mode, recording, buttons
@@ -202,7 +237,15 @@ def add_drone_sim(V, cfg):
     gym = build_drone_env(cfg)
 
     inputs = ["steering", "throttle", "roll", "altitude", "user/arm"]
-    outputs = ["cam/image_array", "rc/roll", "rc/pitch", "rc/yaw", "rc/throttle"]
+    outputs = [
+        "cam/image_array",
+        "rc/roll",
+        "rc/pitch",
+        "rc/yaw",
+        "rc/throttle",
+        "rc/arm",
+        "rc/mode",
+    ]
 
     if cfg.DRONE_RECORD_POSITION:
         outputs += ["pos/pos_x", "pos/pos_y", "pos/pos_z"]
@@ -212,6 +255,12 @@ def add_drone_sim(V, cfg):
         outputs += ["vel/vel_x", "vel/vel_y", "vel/vel_z"]
     if getattr(cfg, "DRONE_RECORD_IMU", False):
         outputs += IMU_KEYS
+    outputs += [
+        "bf/armed",
+        "bf/arming_flags",
+        "bf/arming_disable_flags",
+        "bf/active_modes",
+    ]
 
     V.add(gym, inputs=inputs, outputs=outputs, threaded=True)
 
@@ -583,6 +632,7 @@ def drive(
         hover = getattr(cfg, "DRONE_HOVER_THROTTLE", 1500)
         thr_range = getattr(cfg, "DRONE_THROTTLE_RANGE", 300)
         max_pitch = getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0)
+        max_roll = getattr(cfg, "DRONE_MAX_ROLL_ANGLE", max_pitch)
         delay_ms = getattr(cfg, "SIMULATED_DELAY_MS", 0)
         angle_mode = getattr(cfg, "DRONE_ANGLE_MODE", True)
         altitude_hold = getattr(cfg, "DRONE_ALTITUDE_HOLD_ENABLED", False)
@@ -592,6 +642,7 @@ def drive(
         print(f"  Hover PWM: {hover} ± {thr_range}")
         print(f"  Alt hold:  {'on' if altitude_hold else 'off'}")
         print(f"  Max pitch: {max_pitch}°")
+        print(f"  Max roll:  {max_roll}°")
         print(f"  Max yaw:   {getattr(cfg, 'DRONE_MAX_YAW_RATE', 90.0)} deg/s")
         if delay_ms > 0:
             print(f"  Sim delay: {delay_ms}ms")
@@ -837,6 +888,12 @@ def add_user_controller(V, cfg, use_joystick, use_xbox=False, input_image="ui/im
             "rc/pitch",
             "rc/yaw",
             "rc/throttle",
+            "rc/arm",
+            "rc/mode",
+            "bf/armed",
+            "bf/arming_flags",
+            "bf/arming_disable_flags",
+            "bf/active_modes",
         ],
         outputs=[
             "user/steering",

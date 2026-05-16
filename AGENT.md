@@ -18,10 +18,10 @@ DonkeyDrone adapts the DonkeyCar pipeline to fly a simulated quadrotor drone usi
 # Install dependencies
 uv sync
 
-# Launch (manual drive, default airframe = 65mm Air65)
+# Launch (manual drive, default airframe = 80mm Pavo Pico II)
 ./scripts/start.sh
-# Launch the 85mm FlyWoo Flylens profile instead
-./scripts/start.sh --airframe=85mm
+# Launch the 65mm Air65 profile instead
+./scripts/start.sh --airframe=65mm
 
 # Launch (autopilot)
 ./scripts/start.sh --model=models/pilot.pth
@@ -86,7 +86,7 @@ Web UI: http://127.0.0.1:8887
    ```
 3. Avoid full/default training unless explicitly requested. Use bounded flags (`--max-epochs`, `--max-samples`, `--batch-size`, `--no-model-summary`) for smoke runs.
 4. Use `bash ./scripts/stop_all.sh` before and after sim tests if Gazebo/BetaFlight/XboxBridge might already be running.
-5. Do not edit `donkeydrone/config.py` for local tuning; edit `donkeydrone/drone_config_65mm.py` or `donkeydrone/drone_config_85mm.py`.
+5. Do not edit `donkeydrone/config.py` for local tuning; edit `donkeydrone/drone_config_65mm.py` or `donkeydrone/drone_config_80mm.py`.
 
 ## Verification / Tests
 
@@ -175,7 +175,7 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 - **gz_camera_worker runs as a subprocess** (not thread) to avoid libprotobuf version conflicts between gz-python and TensorFlow/PyTorch
 - **Shared memory IPC**: parent creates POSIX SharedMemory, worker writes frames with a sequence counter, parent polls counter in `run_threaded()` for zero-copy reads
 - **Direct throttle**: no altitude PID — `altitude [-1,1]` maps to motor power, matching real BetaFlight Angle mode behavior for CNN transferability
-- **Config system** (DonkeyCar pattern): `dk.load_config(config_path='config.py', myconfig='drone_config_65mm.py')` (or `_85mm`) — edit the airframe-specific file, never `config.py`
+- **Config system** (DonkeyCar pattern): `dk.load_config(config_path='config.py', myconfig='drone_config_65mm.py')` (or `_80mm`) — edit the airframe-specific file, never `config.py`
 
 ## Key Files
 
@@ -185,8 +185,8 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 | `donkeydrone/drone_gym.py` | DroneGymEnv: BetaFlight RC UDP + camera bridge |
 | `donkeydrone/drone_env.py` | Shared builder for constructing `DroneGymEnv` from config |
 | `donkeydrone/gz_telemetry.py` | Gazebo pose/IMU telemetry helpers |
-| `donkeydrone/drone_config_65mm.py` | Air65 (65mm, ~31g AUW) config — default airframe |
-| `donkeydrone/drone_config_85mm.py` | FlyWoo Flylens (85mm, ~125g AUW) config — alternate airframe |
+| `donkeydrone/drone_config_80mm.py` | Pavo Pico II O4 (80mm, 79g with selected battery) config — default airframe |
+| `donkeydrone/drone_config_65mm.py` | Air65 (65mm, ~31g AUW) config — alternate airframe |
 | `donkeydrone/config.py` | Base DonkeyCar config (**do not modify**) |
 | `donkeydrone/gz_camera_worker.py` | Subprocess: gz-transport camera → shared memory |
 | `donkeydrone/tub_schema.py` | Shared tub input/type schema and IMU key list |
@@ -197,7 +197,7 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 | `donkeydrone/evaluate.py` | Offline checkpoint evaluator and model comparison CLI |
 | `donkeydrone/autonomous_collect.py` | Headless scripted data collector |
 | `donkeydrone/smoke_test.py` | Lightweight local smoke checks |
-| `scripts/start.sh` | One-command launcher. Flags: `--airframe=65mm\|85mm` (default 65mm), `--no-manage` (sim stack only). |
+| `scripts/start.sh` | One-command launcher. Flags: `--airframe=65mm\|80mm` (default 80mm), `--no-manage` (sim stack only). |
 | `scripts/stop_all.sh` | Force-kill all processes |
 | `scripts/stop-all.sh` | Compatibility wrapper around `scripts/stop_all.sh` |
 | `scripts/collect_train.sh` | Starts sim stack, runs scripted collection, then trains |
@@ -206,7 +206,7 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 | `data/` | Recorded DonkeyCar tub folders (`tub_N_YY-MM-DD`) |
 | `models/` | Saved `.pth` checkpoints and baseline pilot models |
 | `worlds/drone_course_65mm.sdf` | 65mm Air65 world (includes `betaloop_drone_cam_65mm`) |
-| `worlds/drone_course_85mm.sdf` | 85mm FlyWoo Flylens world (includes `betaloop_drone_cam_85mm`) |
+| `worlds/drone_course_80mm.sdf` | 80mm Pavo Pico II world (includes `betaloop_drone_cam_80mm`) |
 
 ### External Files (outside this repo)
 
@@ -216,7 +216,7 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 | `~/dev/aeroloop_gazebo/plugins/BetaflightPlugin.cc` | Bridge plugin source: UDP 9002/9003 between BetaFlight ↔ Gazebo |
 | `~/dev/aeroloop_gazebo/plugins/build/libBetaflightPlugin.dylib` | Compiled plugin loaded by Gazebo at runtime |
 | `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_65mm/` | 65mm Air65 quadrotor model (4 rotors + LiftDrag + IMU + forward camera) |
-| `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_85mm/` | 85mm FlyWoo Flylens quadrotor model (heavier frame, larger rotor spacing) |
+| `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_80mm/` | 80mm Pavo Pico II O4 quadrotor model |
 | `~/dev/betaflight/` | BetaFlight firmware source (SITL target) |
 | `~/dev/betaflight/obj/main/betaflight_SITL.elf` | Compiled BetaFlight SITL binary |
 | `~/.gz/sim/8/server.config` | Gazebo default server plugins (Physics, UserCommands, SceneBroadcaster) |
@@ -250,14 +250,15 @@ Current useful local models:
 
 `donkeydrone/evaluate.py` can load current `control_feedback` checkpoints and legacy `legacy_imu_fc` / `legacy_imu_gru` formats for offline comparison.
 
-## Important Config Parameters (`donkeydrone/drone_config_{65,85}mm.py`)
+## Important Config Parameters (`donkeydrone/drone_config_{65,80}mm.py`)
 
-- `DRONE_GZ_CAMERA_TOPIC`: must match world + model name — the two configs are preset for their own worlds (`drone_course_65mm` / `drone_course_85mm`)
-- `GZ_WORLD` env var in `scripts/start.sh`: derived from `--airframe` (default `drone_course_65mm`); only override manually if you know what you're doing
+- `DRONE_GZ_CAMERA_TOPIC`: must match world + model name — the default 80mm config points at `baylands_80mm`; the retained 65mm config points at `drone_course_65mm`
+- `GZ_WORLD` env var in `scripts/start.sh`: defaults to `baylands_80mm` for the 80mm airframe and `drone_course_65mm` for 65mm; override manually only when selecting a specific world
 - `BETAFLIGHT_RC_HOST`/`BETAFLIGHT_RC_PORT`: BetaFlight SITL RC endpoint (default 127.0.0.1:9004)
 - `DRONE_HOVER_THROTTLE`: PWM midpoint for hover (default 1500)
 - `DRONE_THROTTLE_RANGE`: altitude [-1,1] maps to ±this around hover (default 300)
 - `DRONE_MAX_PITCH_ANGLE`: max pitch degrees for forward tilt (default 25.0)
+- `DRONE_MAX_ROLL_ANGLE`: max roll degrees for lateral bank. Defaults to pitch if omitted; values above pitch increase roll stick PWM relative to pitch.
 - `SIMULATED_DELAY_MS`: simulated camera delay in ms (0=off)
 - `MEASURE_LOOP_DELAY`: log vehicle loop timing stats
 - `IMAGE_W`/`IMAGE_H`: camera resolution for CNN pipeline (default 320×240)
@@ -287,7 +288,7 @@ The hover PWM depends on: drone mass, `motorConstant` in `model.sdf`, `maxRpm`, 
 For the current 65mm Air65-style model (total mass ≈ 0.031 kg, `maxRpm=2094`):
 
 - `motorConstant = 7.0e-8` → hover at **PWM ≈ 1493** (50% throttle), TWR ≈ 4× — matches a real BetaFPV Air65 (65mm, ~31g AUW)
-- For reference, the prior 85mm FlyWoo Flylens profile was `motorConstant = 2.8e-7` at 125g AUW (also hover ≈ 1495, same TWR)
+- The 80mm Pavo Pico II O4 profile uses `motorConstant = 1.9e-7`, total modeled mass 0.079kg with the selected battery, and calibrated hover PWM 1475.
 
 If the drone launches at a PWM well below 1500, lower `motorConstant`. If it can't lift off at all, raise it. Since thrust ∝ motorConstant × ω² and ω scales linearly with PWM, motorConstant must scale with mass to preserve hover PWM when you change the airframe.
 
@@ -357,28 +358,25 @@ Risks: oscillation if `k` is too high. Start low and tune up. The Gazebo pose to
 
 ## Gazebo Worlds & Drone Models
 
-Two parallel airframes share one course layout but separate world + model files. `--airframe=65mm|85mm` on `start.sh` / `test_thrust.sh` selects between them (default 65mm).
+Two parallel airframes are available. `--airframe=65mm|80mm` on `start.sh` / `test_thrust.sh` selects between them (default 80mm). The default 80mm world is `baylands_80mm`; `drone_course_65mm` is retained for Air65.
 
-Both `worlds/drone_course_65mm.sdf` and `worlds/drone_course_85mm.sdf` include:
-- Identical colored wall course (red, yellow, blue, orange) with landmark pillars
-- `<include>` for the matching `betaloop_drone_cam_{65,85}mm` model (resolved via `GZ_SIM_RESOURCE_PATH`)
-- All 5 required world plugins: `Physics`, `UserCommands`, `SceneBroadcaster`, `Sensors` (ogre2), `Imu`
+The `worlds/*_80mm.sdf` files include `betaloop_drone_cam_80mm` and the retained `worlds/drone_course_65mm.sdf` includes `betaloop_drone_cam_65mm`. Each world must include all 5 required world plugins: `Physics`, `UserCommands`, `SceneBroadcaster`, `Sensors` (ogre2), `Imu`.
 
 The 65mm model (`~/dev/aeroloop_gazebo/models/betaloop_drone_cam_65mm/model.sdf`) — BetaFPV Air65:
 - 0.022kg base_link, ~0.031kg AUW, rotor positions ±0.023m (65mm wheelbase)
 - `motorConstant = 7.0e-8` — hover ≈ PWM 1493, TWR ≈ 4×
 - 31mm (1.2") props, 0802-class motors (vel_cmd_max=2094 rad/s)
 
-The 85mm model (`~/dev/aeroloop_gazebo/models/betaloop_drone_cam_85mm/model.sdf`) — FlyWoo Flylens:
-- 0.088kg base_link, ~0.125kg AUW, rotor positions ±0.030m (85mm wheelbase)
-- `motorConstant = 2.8e-7` — hover ≈ PWM 1497, TWR ≈ 4×
-- Same prop/motor class as 65mm; only mass + spacing differ
+The 80mm model (`~/dev/aeroloop_gazebo/models/betaloop_drone_cam_80mm/model.sdf`) — Pavo Pico II:
+- 0.065kg base_link, 0.079kg total modeled mass with selected battery, rotor positions ±0.028284m (80mm diagonal wheelbase)
+- `motorConstant = 1.9e-7` — calibrated hover PWM 1475
+- LAVA 1102 14000KV motors and GF 45mm tri-blade prop approximation
 
 Both have forward-facing camera (640×480, 30Hz, 80° FOV), IMU on base_link (1000Hz NED-rotated), BetaflightPlugin with rotor-to-joint mapping (BF QUADX motor order), and scaled Iris mesh as a visual placeholder.
 
 Camera topics:
 - 65mm: `/world/drone_course_65mm/model/betaloop_drone_cam_65mm/link/camera_link/sensor/camera/image`
-- 85mm: `/world/drone_course_85mm/model/betaloop_drone_cam_85mm/link/camera_link/sensor/camera/image`
+- 80mm default: `/world/baylands_80mm/model/betaloop_drone_cam_80mm/link/camera_link/sensor/camera/image`
 
 ### BetaflightPlugin Rotor Mapping
 
@@ -408,7 +406,7 @@ Do **not** re-map `<jointName>` using a "BF motor index → joint" table. That d
 `gz sim` cannot run server + GUI in one process on macOS ([gz-sim#44](https://github.com/gazebosim/gz-sim/issues/44)). `start.sh` launches `gz sim -s` (server) then `gz sim -g` (GUI) separately. Set `GZ_HEADLESS=1` to skip the GUI.
 
 ### Stale gz-transport topics
-After killing Gazebo, camera topics can persist in gz-transport's multicast discovery cache for several minutes. The readiness check in `start.sh` matches the specific `betaloop_drone_cam_{65,85}mm` topic (derived from `--airframe`) to avoid false positives from stale topics.
+After killing Gazebo, camera topics can persist in gz-transport's multicast discovery cache for several minutes. The readiness check in `start.sh` matches the specific `betaloop_drone_cam_{65,80}mm` topic (derived from `--airframe`) to avoid false positives from stale topics.
 
 ### World-level plugins override server.config defaults
 Adding ANY `<plugin>` to the world SDF causes Gazebo to skip loading `~/.gz/sim/8/server.config` plugins (Physics, UserCommands, SceneBroadcaster). This means each `worlds/drone_course_XXmm.sdf` must explicitly include ALL five plugins: Physics, UserCommands, SceneBroadcaster, Sensors, and Imu. Without Physics, nothing moves — no gravity, no forces, no joint actuation.
@@ -429,13 +427,13 @@ Gazebo camera sensors can crash with the Metal rendering backend. The world uses
 The `resource_tracker` may warn about leaked shared memory on shutdown — this is cosmetic, caused by a race between `stop_all.sh` killing processes and Python's resource tracker cleanup.
 
 ### Switching airframes
-Use `--airframe=65mm|85mm` on `start.sh` and `test_thrust.sh` (default 65mm). That selects the world (`drone_course_XXmm`), model (`betaloop_drone_cam_XXmm`), and config (`drone_config_XXmm.py`) together. Each config has its own `DRONE_GZ_CAMERA_TOPIC` already matching its world + model.
+Use `--airframe=65mm|80mm` on `start.sh` and `test_thrust.sh` (default 80mm). By default, 80mm selects `baylands_80mm`; 65mm selects `drone_course_65mm`. Set `GZ_WORLD=<world_name>` to use another converted 80mm world such as `forest_80mm`, `landing_target_80mm`, `slalom_gates_80mm`, or `drone_course_80mm`.
 
 ## Current Status (2026-04-18)
 
-Two airframes are maintained in parallel for A/B flight comparison: **65mm BetaFPV Air65** (~31g AUW, default) and **85mm FlyWoo Flylens** (~125g AUW). Each has its own model dir (`betaloop_drone_cam_{65,85}mm`), world SDF (`drone_course_{65,85}mm.sdf`), and config (`drone_config_{65,85}mm.py`). Motor constants are scaled so both hover near PWM 1495 with TWR ≈ 4×. Existing `eeprom.bin` retained across airframes (fresh eeprom path via start.sh is known-broken — see memory).
+Two airframes are maintained in parallel for A/B flight comparison: **65mm BetaFPV Air65** (~31g AUW, default) and **80mm Pavo Pico II O4** (79g with selected battery). Each has its own model dir (`betaloop_drone_cam_{65,80}mm`), world SDF (`drone_course_{65,80}mm.sdf`), and config (`drone_config_{65,80}mm.py`). The Pavo Pico II constants are based on BETAFPV's published 80mm wheelbase, LAVA 1102 14000KV motors, and GF 45mm props, with battery mass added to reach 79g AUW. Existing `eeprom.bin` retained across airframes (fresh eeprom path via start.sh is known-broken — see memory).
 
-Known quirk: on Air65, yaw input causes significantly more climb than on the 85mm (mass is 4× smaller, mixer ω² asymmetry produces the same excess thrust → 4× more acceleration). `DRONE_YAW_PWM_CAP = 30` in both configs is the pending tuning knob.
+Known quirk: on Air65, yaw input causes significantly more climb than on larger profiles because the mixer ω² asymmetry produces more vertical acceleration on lower mass/inertia airframes. `DRONE_YAW_PWM_CAP` remains the main tuning knob.
 
 Full stack working end-to-end: `start.sh` → Gazebo + BetaFlight SITL + drone_manage.py all launch, RC packets flow at 50Hz, camera frames arrive via shared memory, Web UI at :8887.
 
@@ -447,7 +445,7 @@ Goal: collect new-format drone data with no human intervention, then verify trai
 
 Recent changes in progress:
 - `donkeydrone/drone_gym.py` now subscribes to Gazebo pose + IMU telemetry and can output raw 6-axis IMU fields alongside position, attitude, and velocity.
-- `DRONE_RECORD_IMU = True` was added to both `drone_config_65mm.py` and `drone_config_85mm.py`.
+- `DRONE_RECORD_IMU = True` was added to both `drone_config_65mm.py` and `drone_config_80mm.py`.
 - `donkeydrone/drone_manage.py` records the new IMU fields into manual/autopilot tubs when `DRONE_RECORD_IMU` is enabled.
 - `donkeydrone/torch_pilot.py` was updated so `.pth` inference passes an IMU history tensor to `LinearModel`; the new model no longer works with image-only inference.
 - `donkeydrone/dataset.py` was updated for new-format tubs:

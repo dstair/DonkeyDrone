@@ -74,8 +74,8 @@ DRONE_YAW_PWM_CAP = 40
 
 # ---- Altitude Hold (Vertical Velocity Damper) ----
 # Proportional gain (PWM per m/s): -k_pwm * vz added to throttle when
-# altitude stick is in deadband. Start with k=30 (1 m/s climb gets -30 PWM).
-DRONE_ALTITUDE_HOLD_K = 30.0
+# altitude stick is in deadband. 45 passes the 80mm damper-sim check.
+DRONE_ALTITUDE_HOLD_K = 45.0
 
 # Deadband around altitude=0 where damper is active (in normalized [-1,1] units).
 # Stick outside this range bypasses damper so climb/descend commands dominate.

@@ -351,6 +351,51 @@ Validation: add `--mode=damper` to `test_thrust.py`. Steps: (a) fly to ~2m with 
 
 Risks: oscillation if `k` is too high. Start low and tune up. The Gazebo pose topic is ~30Hz so the damper loop won't be tight — expect smooth but not snappy settling.
 
+### Planned: translational drag / lateral coast fix
+
+Problem: the current Gazebo airframes have essentially no body translational drag. Both external model files set:
+
+```xml
+<velocity_decay>
+  <linear>0.0</linear>
+  <angular>0.0</angular>
+</velocity_decay>
+```
+
+Files:
+- `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_65mm/model.sdf`
+- `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_80mm/model.sdf`
+
+Observed symptom: after sideways roll input, returning to level stops lateral acceleration but does not bleed off existing XY velocity, producing a "skating rink" effect.
+
+Validation now exists in `donkeydrone/test_thrust.py --mode=lateral-coast`. It:
+1. Climbs to altitude.
+2. Applies roll for a configurable acceleration phase.
+3. Centers roll and samples XY speed, XY drift, altitude drift, and speed half-life.
+
+Example command:
+
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=lateral-coast \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.5 \
+  --lateral-roll-pwm=1700 --lateral-accel-s=1.5 --lateral-coast-s=6
+```
+
+Baseline result before drag, 80mm Pavo Pico II:
+- Peak sampled XY speed after leveling: `3.200 m/s`
+- Final XY speed after `6.3s`: `3.033 m/s`
+- XY drift while leveled: `19.344 m`
+- Speed half-life: `> 6.0s`
+
+Implementation plan:
+1. Start with SDF `velocity_decay` on `base_link`, because it is simple, reversible, and applies directly to the missing body velocity damping. Tune both 65mm and 80mm model files in `~/dev/aeroloop_gazebo/models/.../model.sdf`.
+2. Sweep small linear decay values first, e.g. `0.05`, `0.10`, `0.20`, `0.35`. Do not change angular decay initially; attitude control and rotor dynamics are already sensitive.
+3. After each value, run `--mode=lateral-coast` with the gentler command above. Target: obvious XY speed decay over 3-6s without making lateral control feel like it is flying through syrup. A reasonable first target is speed falling below 50% within roughly 2-4s for a ~3 m/s sideways entry.
+4. Re-run `--mode=inflight-hover` or the known hover checks after choosing a drag value. Linear decay may change effective hover/climb behavior and autopilot training distribution.
+5. If scalar `velocity_decay` is too blunt, replace it with a dedicated drag system/plugin that applies force `F = -k1*v - k2*|v|*v` in world XY/body axes, with separate horizontal and vertical coefficients. This is more realistic but should be second pass.
+
+Important distinction: translational drag makes the simulated airframe physically bleed velocity. It is not the same as active position/velocity hold. Even with drag, a real Angle-mode quad will coast somewhat after stick release; it just should not preserve speed for many seconds.
+
 ## External Dependencies (not in pyproject.toml)
 
 - BetaFlight SITL binary: `~/dev/betaflight/obj/main/betaflight_SITL.elf` (override with `BETAFLIGHT_SITL_BIN` env var)
@@ -955,3 +1000,172 @@ Current workspace notes:
 - `README.md` had user edits before this handoff; do not overwrite them casually.
 - `donkeydrone/drone_config_65mm.py` may have local/user tuning, including camera/world settings; inspect before editing.
 - Sim processes were stopped after validation; `pgrep -fl 'gz sim|gzserver|gzclient|ArduCopter|ardupilot|drone_manage|sim_vehicle|mavproxy'` returned nothing.
+
+## Current Handoff (2026-05-16 lateral drag investigation)
+
+User reported a "skating rink" effect: after sideways motion, leveling the drone leaves it sliding for a long time, unlike Velocidrone.
+
+Finding:
+- The Gazebo airframe SDFs in `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_65mm/model.sdf` and `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_80mm/model.sdf` set base-link `<velocity_decay><linear>0.0</linear><angular>0.0</angular></velocity_decay>`.
+- Current model has rotor/motor damping and yaw drag terms, but no meaningful body translational drag. So Angle mode levels the drone but does not remove existing XY velocity.
+
+Added `donkeydrone/test_thrust.py --mode=lateral-coast`:
+- `make_channels(...)` now accepts `roll_pwm` for CH1.
+- New `run_lateral_coast_test(...)` climbs, applies sideways roll, centers roll, then logs XY speed, XY drift, altitude drift, and speed half-life.
+- New args: `--lateral-roll-pwm`, `--lateral-accel-s`, `--lateral-coast-s`.
+
+Validation:
+```bash
+uv run --env-file .env python -m py_compile donkeydrone/test_thrust.py
+
+./scripts/test_thrust.sh --airframe=80mm --mode=lateral-coast \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.5 \
+  --lateral-roll-pwm=1700 --lateral-accel-s=1.5 --lateral-coast-s=6
+```
+
+Result from gentler 80mm run:
+- Peak sampled XY speed after leveling: `3.200 m/s`
+- Final XY speed after `6.3s`: `3.033 m/s`
+- XY drift while leveled: `19.344 m`
+- Speed half-life: `> 6.0s`
+
+Plan documented above under `### Planned: translational drag / lateral coast fix`. Start by tuning `base_link` linear `velocity_decay` in the external aeroloop model SDFs, then validate with `--mode=lateral-coast` and re-check hover behavior. Do not start with active horizontal velocity hold; first make the physics bleed velocity.
+
+## Current Handoff (2026-05-16 translational drag selected)
+
+Completed the lateral-drag tuning pass. Final selected coefficient is `0.25 1/s`, applied consistently to both external models:
+- `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_65mm/model.sdf`
+- `~/dev/aeroloop_gazebo/models/betaloop_drone_cam_80mm/model.sdf`
+
+Important implementation detail:
+- The original SDF-only plan did not work under the current Bullet/Harmonic stack. Sweeping `base_link` `<velocity_decay><linear>` through `0.05`, `0.10`, `0.20`, and `0.35` produced no meaningful lateral speed decay.
+- Added a narrow fallback to `~/dev/aeroloop_gazebo/plugins/BetaflightPlugin.cc`: it reads `<horizontalVelocityDecay>` from the model plugin block and applies horizontal drag as `F = -m * k * v_xy` on the canonical link. The base-link `<velocity_decay><linear>` is kept at the same value for documentation/SDF intent, but the measured effect comes from the plugin fallback.
+- Angular decay remains `0.0`.
+
+80mm lateral-coast command used for all sweep runs:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=lateral-coast \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.5 \
+  --lateral-roll-pwm=1700 --lateral-accel-s=1.5 --lateral-coast-s=6
+```
+
+Baseline before drag:
+- Peak sampled XY speed after leveling: `3.200 m/s`
+- Final XY speed after `6.3s`: `3.033 m/s`
+- XY drift while leveled: `19.344 m`
+- Speed half-life: `> 6.0s`
+
+SDF-only sweep, before plugin fallback:
+- `0.05`: peak `3.239 m/s`, final `2.995 m/s`, drift `19.545 m`, half-life `>6s`
+- `0.10`: peak `3.147 m/s`, final `3.105 m/s`, drift `19.436 m`, half-life `>6s`
+- `0.20`: peak `3.195 m/s`, final `3.146 m/s`, drift `19.181 m`, half-life `>6s`
+- `0.35`: peak `3.265 m/s`, final `3.042 m/s`, drift `19.398 m`, half-life `>6s`
+
+Plugin-backed tuning results:
+- `0.35`: peak `2.695 m/s`, final `0.378 m/s` after `6.7s`, drift `7.995 m`, half-life `2.67s`
+- `0.20`: peak `2.667 m/s`, final `0.903 m/s` after `6.8s`, drift `11.348 m`, half-life `4.57s`
+- Selected `0.25`: peak `2.582 m/s`, final `0.662 m/s` after `6.8s`, drift `9.719 m`, half-life `3.74s`
+
+Hover/in-flight check after selecting `0.25`:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=inflight-hover \
+  --airborne-climb=1500 --airborne-climb-s=1.5 \
+  --hover-low=1450 --hover-high=1510 --hover-step=5
+```
+Result caveat: the sweep was not useful for hover tuning because all samples were climbing; closest-to-hover was reported at `PWM=1510` with `vz=+3.216 m/s`, and the script reported no zero crossing. The new drag force is horizontal-only, so this should not be caused by vertical drag, but hover tuning still needs a better bounded check/range.
+
+Validation completed:
+```bash
+uv run --env-file .env python -m py_compile donkeydrone/test_thrust.py
+bash -n scripts/test_thrust.sh scripts/start.sh scripts/stop_all.sh
+cmake --build /Users/Dan/dev/aeroloop_gazebo/plugins/build
+gz sdf -k /Users/Dan/dev/aeroloop_gazebo/models/betaloop_drone_cam_65mm/model.sdf
+gz sdf -k /Users/Dan/dev/aeroloop_gazebo/models/betaloop_drone_cam_80mm/model.sdf
+```
+
+## Current Handoff (2026-05-16 vertical hover investigation)
+
+Investigated the "all tested hover PWMs climb" caveat from the lateral-drag pass.
+
+Finding:
+- The previous command used `--hover-low=1450 --hover-high=1510 --hover-step=5` after a stronger climb. Because `run_inflight_hover_sweep` sweeps high-to-low, the early high-PWM samples injected a lot of upward momentum, and later low-PWM samples still measured climb while the vehicle coasted upward.
+- The script also allowed ground-contact samples into the hover summary. Once the drone hits the ground, `z` is clamped and apparent `vz` can look like zero, which can corrupt the closest-to-hover and interpolation results.
+- Angle vs Acro did not materially change the hover result, so this does not look like a BetaFlight altitude-controller/PID issue. The test uses direct CH3 motor throttle; no BF altitude controller is active.
+
+Code changed:
+- `donkeydrone/test_thrust.py`: `run_inflight_hover_sweep` now ignores samples below `0.25m` for summary/interpolation and only interpolates zero-vz from adjacent in-flight samples.
+- `donkeydrone/drone_config_80mm.py`: kept `DRONE_HOVER_THROTTLE = 1475`, updated `DRONE_ALTITUDE_HOLD_K = 45.0`.
+
+Commands/results:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=inflight-hover \
+  --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --hover-low=1150 --hover-high=1450 --hover-step=25
+```
+- `1450`: `vz=-0.094 m/s`, `alt=0.95m`
+- `1425`: `vz=-0.201 m/s`, then too low
+- This showed the real hover region was not above `1510`; the earlier caveat was a bad sweep setup.
+
+Focused Angle sweep after fixing summary logic:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=inflight-hover \
+  --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --hover-low=1435 --hover-high=1480 --hover-step=5
+```
+- `1480`: `vz=+1.143 m/s`
+- `1475`: `vz=+1.058 m/s`
+- `1470`: `vz=+0.691 m/s`
+- `1465`: `vz=-0.024 m/s`
+- `1460`: `vz=-1.081 m/s`
+- Corrected summary: closest-to-hover `PWM=1465`; interpolated zero-vz `PWM=1465.2`.
+
+Acro comparison:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=inflight-hover --acro \
+  --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --hover-low=1435 --hover-high=1480 --hover-step=5
+```
+- Closest-to-hover `PWM=1465`; interpolated zero-vz `PWM=1465.3`.
+- This matches Angle mode closely, so attitude mode is not the cause.
+
+Runtime damper checks:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=damper-sim \
+  --airborne-hover=1465 --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --damper-sample-s=8
+```
+- Failed: landed after several seconds; after-settle drift `-1.203m`, `vz_mean=-0.159m/s`.
+
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=damper-sim \
+  --airborne-hover=1470 --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --damper-sample-s=8
+```
+- Failed: landed after several seconds; after-settle drift `-1.323m`, `vz_mean=-0.174m/s`.
+
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=damper-sim \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --damper-sample-s=8
+```
+- Nearly passed: total drift `+0.143m`; after-settle drift `-0.507m`, `vz_mean=-0.067m/s`.
+
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=damper-sim \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --damper-k=45 --damper-sample-s=8
+```
+- Passed: total drift `+0.082m`; after-settle drift `-0.416m`, `alt_p2p=0.436m`, `vz_mean=-0.056m/s`, `ch3_mean=1477.2`.
+
+Conclusion:
+- Do not retune `motorConstant` from this caveat alone. The 80mm thrust model is close enough for the current controller.
+- The real fix was to correct the hover test summary and raise the 80mm vertical damper gain from `30` to `45`.
+- `1465` is the raw zero-vz estimate in a dynamic high-to-low sweep, but `1475` remains the better runtime hover bias with the current damper loop.
+
+Validation:
+```bash
+uv run --env-file .env python -m py_compile \
+  donkeydrone/test_thrust.py donkeydrone/drone_config_80mm.py \
+  donkeydrone/drone_env.py donkeydrone/drone_gym.py
+bash -n scripts/test_thrust.sh scripts/start.sh scripts/stop_all.sh
+```

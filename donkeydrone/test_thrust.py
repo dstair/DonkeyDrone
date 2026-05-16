@@ -922,35 +922,49 @@ def run_inflight_hover_sweep(
             logger.info("Drone too low (%.2fm), stopping sweep", pos_b[2])
             break
 
-    valid = [r for r in results if r[2] is not None]
-    if not valid:
+    min_inflight_alt = 0.25
+    valid = [r for r in results if r[2] is not None and r[1] is not None]
+    inflight = [r for r in valid if r[1] > min_inflight_alt]
+    if not inflight:
         logger.warning("No valid samples — abort.")
         return
 
     # Find true hover: PWM where vz crosses zero (or closest to zero)
-    best = min(valid, key=lambda r: abs(r[2]))
+    best = min(inflight, key=lambda r: abs(r[2]))
     logger.info("--- Inflight hover sweep summary ---")
     logger.info("Closest-to-hover: PWM=%d (vz=%+.3f m/s, alt=%.2fm)",
                 best[0], best[2], best[1])
 
-    # Linear interpolation: find zero crossing if we have one
-    pos_vz = [r for r in valid if r[2] > 0]
-    neg_vz = [r for r in valid if r[2] < 0]
-    if pos_vz and neg_vz:
-        # smallest positive vz and largest negative vz (closest pair around 0)
-        p = min(pos_vz, key=lambda r: r[2])
-        n = max(neg_vz, key=lambda r: r[2])
+    # Linear interpolation: use adjacent in-flight samples only. This avoids
+    # using ground-contact samples where z is clamped and apparent vz is false.
+    crossing = None
+    ordered = sorted(inflight, key=lambda r: r[0])
+    for low, high in zip(ordered, ordered[1:]):
+        if low[2] == 0:
+            crossing = (low, low)
+            break
+        if (low[2] < 0 < high[2]) or (high[2] < 0 < low[2]):
+            crossing = (low, high)
+            break
+
+    if crossing:
+        n, p = crossing
+        if n[2] > p[2]:
+            n, p = p, n
         if p[0] != n[0]:
             slope = (p[2] - n[2]) / (p[0] - n[0])  # m/s per PWM
             zero_pwm = n[0] - n[2] / slope
             logger.info("Zero-vz interpolated: PWM=%.1f", zero_pwm)
             logger.info("Slope: %.4f (m/s) per PWM near hover", slope)
             logger.info("Suggested DRONE_HOVER_THROTTLE = %d", round(zero_pwm))
+        else:
+            logger.info("Zero-vz sampled directly: PWM=%d", n[0])
+            logger.info("Suggested DRONE_HOVER_THROTTLE = %d", n[0])
     else:
         logger.info(
             "No vz zero-crossing found in sweep range — "
             "true hover is %s than swept range",
-            "lower" if all(r[2] > 0 for r in valid) else "higher",
+            "lower" if all(r[2] > 0 for r in inflight) else "higher",
         )
 
 

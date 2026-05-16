@@ -458,14 +458,19 @@ else
     # Launch the Xbox controller bridge (.app bundle) if --xbox was passed.
     # GameController.framework is the only macOS path that sees an Xbox
     # controller (Apple's XboxGamepad dext blocks pygame/SDL/hidapi), and it
-    # only works from a real .app bundle. The bridge sends 18-byte frames at
+    # only works from a real .app bundle. The bridge sends controller frames at
     # 60Hz to /tmp/donkeydrone_xbox.sock; XboxDroneController binds it.
     if [ "$USE_XBOX" = "1" ]; then
         XBOX_APP="$PROJECT_DIR/xbox_bridge/build/XboxBridge.app"
+        XBOX_BIN="$XBOX_APP/Contents/MacOS/XboxBridge"
         if [ ! -d "$XBOX_APP" ]; then
             echo "ERROR: $XBOX_APP not found." >&2
             echo "Build it with: bash $PROJECT_DIR/xbox_bridge/build.sh" >&2
             exit 1
+        fi
+        if [ "$PROJECT_DIR/xbox_bridge/main.swift" -nt "$XBOX_BIN" ]; then
+            echo "XboxBridge source is newer than the app; rebuilding..."
+            bash "$PROJECT_DIR/xbox_bridge/build.sh"
         fi
         # Kill any prior instance so it re-enumerates the controller cleanly.
         stop_xbox_bridge

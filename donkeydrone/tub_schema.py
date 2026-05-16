@@ -4,10 +4,11 @@ BASE_TUB_INPUTS = [
     "cam/image_array",
     "user/angle",
     "user/throttle",
+    "user/roll",
     "user/altitude",
     "user/mode",
 ]
-BASE_TUB_TYPES = ["image_array", "float", "float", "float", "str"]
+BASE_TUB_TYPES = ["image_array", "float", "float", "float", "float", "str"]
 
 POSITION_KEYS = ["pos/pos_x", "pos/pos_y", "pos/pos_z"]
 ATTITUDE_KEYS = ["imu/roll", "imu/pitch", "imu/yaw"]
@@ -28,7 +29,7 @@ DRONE_TUB_INPUTS = (
     + VELOCITY_KEYS
     + IMU_KEYS
 )
-DRONE_TUB_TYPES = ["image_array"] + ["float"] * 3 + ["str"] + ["float"] * 15
+DRONE_TUB_TYPES = ["image_array"] + ["float"] * 4 + ["str"] + ["float"] * 15
 
 
 def drone_tub_schema(

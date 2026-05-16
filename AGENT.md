@@ -9,6 +9,7 @@ DonkeyDrone adapts the DonkeyCar pipeline to fly a simulated quadrotor drone usi
 **Semantic mapping** (identical key names to DonkeyCar, BetaFlight Angle mode):
 - `steering [-1, 1]` = yaw rate
 - `throttle [-1, 1]` = forward pitch (tilt angle)
+- `roll [-1, 1]` = lateral roll (tilt angle)
 - `altitude [-1, 1]` = motor throttle (direct power, no PID)
 
 ## Commands
@@ -140,13 +141,13 @@ bash ./scripts/stop_all.sh
 ```
 Web Browser (http://127.0.0.1:8887)
     ↓
-LocalWebController (tornado) → user/steering, user/throttle, user/altitude, user/mode
+LocalWebController (tornado) → user/steering, user/throttle, user/roll, user/altitude, user/mode
     ↓
 DriveMode (selects user vs autopilot)
     ↓
 DroneGymEnv (threaded DonkeyCar part)
   ├── update(): background thread with BetaFlight RC loop (50Hz UDP)
-  │     → BetaFlight SITL (UDP 9004): RC channel packets (arm, pitch, yaw, throttle)
+  │     → BetaFlight SITL (UDP 9004): RC channel packets (arm, roll, pitch, yaw, throttle)
   │     → Direct throttle control (no PID), Angle mode stabilization by BetaFlight
   ├── gz_camera_worker.py: separate subprocess for camera frames
   │     → subscribes to gz-transport topic
@@ -155,7 +156,7 @@ DroneGymEnv (threaded DonkeyCar part)
     ↓ (autopilot mode)
 TorchPilot (LinearModel CNN inference)
     ↓
-TubWriter (records to data/)
+TubWriter (records image + yaw/pitch/roll/altitude controls to data/)
 ```
 
 ### BetaFlight SITL Protocol
@@ -229,8 +230,8 @@ Controlled by `DRONE_CAMERA_SOURCE` in your `donkeydrone/drone_config_XXmm.py`:
 ## CNN Model (LinearModel)
 
 - Current model in `donkeydrone/torch_model.py` uses a residual CNN image branch, GRU IMU branch, previous-control feedback branch, and multi-head attention fusion.
-- Inputs: image `(B, 3, H, W)` float32 `[0,1]`, IMU sequence `(B, seq_len, 6)`, previous controls `(B, 3)`.
-- Output: `(B, 3)` for `[steering, throttle, altitude]`.
+- Inputs: image `(B, 3, H, W)` float32 `[0,1]`, IMU sequence `(B, seq_len, 6)`, previous controls `(B, 4)`.
+- Output: `(B, 4)` for `[steering/yaw, throttle/pitch, roll, altitude]`.
 - Offline training/evaluation use `TubDataset`, which returns `(image, imu, prev_ctrl, target)`.
 - `TorchPilot` keeps an IMU history and feeds previous model outputs back as `prev_ctrl` during runtime inference.
 - Training uses MPS (Apple Silicon GPU) automatically if available, then CUDA, then CPU
@@ -270,7 +271,7 @@ BetaFlight SITL is fed 16-channel RC packets over UDP 9004 at 50Hz. Each channel
 
 | Channel | Meaning (Angle mode) | How it's driven |
 |---------|---------------------|-----------------|
-| CH1 | Roll  | held at 1500 (no lateral input in the current mapping) |
+| CH1 | Roll  | `1500 + roll × 500 × DRONE_INPUT_SENSITIVITY` — lateral tilt |
 | CH2 | Pitch | `1500 + throttle × 500 × DRONE_INPUT_SENSITIVITY` — forward tilt |
 | CH3 | **Motor throttle** | bipolar around hover: `clamp(HOVER_THROTTLE + altitude × THROTTLE_RANGE, 1000, 2000)` |
 | CH4 | Yaw   | `1500 + steering × 500 × DRONE_INPUT_SENSITIVITY` |
@@ -313,6 +314,20 @@ BetaFlight's SITL boot state includes an "arm switch was high at boot" safety fl
 - `altitude = +1.0` → PWM 1800 (climb)
 
 The drone takes off on arm because CH3 starts at hover PWM as soon as the arm sequence (which holds CH3=1000 for 2s) completes. To land, hold Down to bring altitude toward -1. If you change the real hover PWM (e.g. by editing `motorConstant`), update `DRONE_HOVER_THROTTLE` so `altitude=0` still corresponds to hover — otherwise the CNN will learn a skewed altitude distribution.
+
+### Manual control mappings
+
+Keyboard/web controls:
+- Up/down arrows control `altitude` (motor throttle around hover).
+- Left/right arrows control `steering` (yaw).
+- `j`/`l` control `roll`.
+
+Xbox controls:
+- Left stick X controls `steering` (yaw).
+- Left stick Y controls `altitude`.
+- Right stick X controls `roll`.
+- Right stick Y controls `throttle` (forward pitch).
+- RT is the explicit arm/deadman input.
 
 ### Planned: vertical-velocity damper (not yet implemented)
 
@@ -877,3 +892,63 @@ Autopilot test command:
 ```bash
 ./scripts/start.sh --model=models/tub_3_26-05-09_full.pth --airframe=65mm
 ```
+
+## Current Handoff (2026-05-10 roll control)
+
+Implemented four-axis controls end-to-end: yaw, pitch, roll, and altitude.
+
+Control mapping:
+- Keyboard/web: left/right arrows = yaw, `j`/`l` = roll, up/down arrows = altitude, throttle remains forward pitch.
+- Browser Gamepad API: left stick X = yaw, left stick Y = altitude, right stick X = roll, right stick Y = pitch.
+- Native Xbox bridge: UDP frame is now `"<fffffBB"`: `lX,lY,rX,rY,rT,buttons,connected`; Python receiver maps left stick X to yaw and right stick X to roll.
+- BetaFlight RC mapping is AETR: CH1 roll, CH2 pitch, CH3 motor throttle, CH4 yaw.
+
+Code areas changed:
+- Tub schema now records `user/roll`; new training data is image + yaw/pitch/roll/altitude + mode + telemetry.
+- `TubDataset`, `LinearModel`, `TorchPilot`, and `evaluate.py` now use four control outputs: `[yaw, pitch, roll, altitude]`.
+- `drone_manage.py` wires `user/roll`, `pilot/roll`, and `DriveMode` through the vehicle loop.
+- `drone_gym.py` maps roll to CH1 PWM and logs `roll_pwm`.
+- `autonomous_collect.py` writes scripted roll into generated tubs.
+- `xbox_bridge/main.swift` and `xbox_bridge/smoke_test.py` use the wider frame with left-stick X.
+
+Validation performed:
+```bash
+uv run --env-file .env python -m py_compile \
+  donkeydrone/drone_gym.py donkeydrone/drone_env.py donkeydrone/drone_manage.py \
+  donkeydrone/xbox_controller.py donkeydrone/tub_schema.py donkeydrone/dataset.py \
+  donkeydrone/torch_model.py donkeydrone/torch_pilot.py donkeydrone/torch_train.py \
+  donkeydrone/evaluate.py donkeydrone/autonomous_collect.py donkeydrone/smoke_test.py \
+  xbox_bridge/smoke_test.py
+
+bash -n scripts/start.sh scripts/collect_train.sh scripts/test_thrust.sh
+bash xbox_bridge/build.sh
+uv run --env-file .env python donkeydrone/smoke_test.py
+```
+
+Bounded four-output training/eval smoke:
+```bash
+uv run --env-file .env python donkeydrone/torch_train.py \
+  --tubs=data/tub_3_26-05-09 \
+  --model=/private/tmp/roll4_smoke.pth \
+  --max-epochs=1 --max-samples=64 --batch-size=16 --no-model-summary
+
+uv run --env-file .env python donkeydrone/evaluate.py \
+  --tubs=data/tub_4_26-05-09 \
+  --model=/private/tmp/roll4_smoke.pth
+```
+
+Results:
+- Training smoke completed on MPS and saved `/private/tmp/roll4_smoke.pth`.
+- Evaluation printed all four axes and produced equal-weight MAE score `0.1832`.
+- TorchPilot load smoke returned four values.
+- Focused RC check returned `{'ch1_roll': 1750, 'ch2_pitch': 1562, 'ch3_throttle': 1500, 'ch4_yaw': 1425}` for roll=1, pitch=0.25, yaw=-1 at 0.5 sensitivity and yaw cap 75.
+- Headless full-stack smoke with `GZ_HEADLESS=1 GZ_WORLD=landing_target_65mm ./scripts/start.sh --airframe=65mm` reached Gazebo ready, started `drone_manage.py`, delivered nonblank camera frames, armed BetaFlight, and logged roll/pitch/yaw/throttle PWM.
+
+Important compatibility note:
+- Existing three-output checkpoints such as `models/hello_world_tub3.pth` and `models/tub_3_26-05-09_full.pth` are no longer runtime-compatible with the current four-output `LinearModel`.
+- Old tubs without `user/roll` load with roll as `0.0`, which is acceptable for smoke/debugging but not enough to train meaningful roll behavior. Collect new roll-inclusive tubs before training a real autopilot.
+
+Current workspace notes:
+- `README.md` had user edits before this handoff; do not overwrite them casually.
+- `donkeydrone/drone_config_65mm.py` may have local/user tuning, including camera/world settings; inspect before editing.
+- Sim processes were stopped after validation; `pgrep -fl 'gz sim|gzserver|gzclient|ArduCopter|ardupilot|drone_manage|sim_vehicle|mavproxy'` returned nothing.

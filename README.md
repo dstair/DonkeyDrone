@@ -375,10 +375,9 @@ X Create Gazebo drone model compatible with BetaFlight bridge (camera sensor att
 X swap out quadcopter type - in my planned build, can't see the rotors.
 X research improvements to CNN. multimodal with IMU and control inputs; cross encoding; GLU
 X add/test input controller support.
-
-
-lower priority:
-- try a different world.
+X try a different world.
+- add roll for better handling.
+- add an 80mm size that matches the Pavo Pico II
 - Add randomization of worlds (wall locations, colors) for better CNN training
 - Add looping to train model on a variety of worlds
 - research other tasks that would be interesting to implement (CNN to scan/build a 3D model of an object, for example)

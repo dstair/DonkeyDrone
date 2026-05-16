@@ -100,11 +100,14 @@ class TubDataset(Dataset):
         
         imu_tensor = torch.tensor(np.array(imu_seq), dtype=torch.float32)
 
-        # 3. Load Targets [steering, throttle, altitude]
-        # Based on drone_config_65mm mapping: 
-        # steering -> yaw, throttle -> pitch, altitude -> motor throttle
+        # 3. Load Targets [yaw, pitch, roll, altitude]
         def get_ctrl(r):
-            return [r.get('user/angle', 0.0), r.get('user/throttle', 0.0), r.get('user/altitude', 0.0)]
+            return [
+                r.get('user/angle', 0.0),
+                r.get('user/throttle', 0.0),
+                r.get('user/roll', 0.0),
+                r.get('user/altitude', 0.0),
+            ]
 
         targets = torch.tensor(get_ctrl(record), dtype=torch.float32)
 

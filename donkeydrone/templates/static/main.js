@@ -6,15 +6,18 @@ var driveHandler = new function() {
             "user": {
                 'angle': 0,
                 'throttle': 0,
+                'roll': 0,
                 'altitude': 0,
             },
             "pilot": {
                 'angle': 0,
                 'throttle': 0,
+                'roll': 0,
                 'altitude': 0,
             }
         },
         'rc': {
+            'roll': 1500,
             'pitch': 1500,
             'yaw': 1500,
             'throttle': 1000,
@@ -134,8 +137,10 @@ var driveHandler = new function() {
           if(e.which == 82) { toggleRecording() }  // 'r'  toggle recording
           if(e.which == 73) { throttleUp() }  // 'i'  throttle up
           if(e.which == 75) { throttleDown() } // 'k'  slow down
-          if(e.which == 74) { angleLeft() } // 'j' turn left
-          if(e.which == 76) { angleRight() } // 'l' turn right
+          if(e.which == 37) { angleLeft(); e.preventDefault() } // left arrow - yaw left
+          if(e.which == 39) { angleRight(); e.preventDefault() } // right arrow - yaw right
+          if(e.which == 74) { rollLeft() } // 'j' roll left
+          if(e.which == 76) { rollRight() } // 'l' roll right
           if(e.which == 38) { altitudeUp(); e.preventDefault() } // arrow up - altitude up
           if(e.which == 40) { altitudeDown(); e.preventDefault() } // arrow down - altitude down
           if(e.which == 65) { updateDriveMode('local') } // 'a' turn on local mode (full _A_uto)
@@ -144,9 +149,11 @@ var driveHandler = new function() {
           if(e.which == 77) { toggleDriveMode() } // 'm' toggle drive mode (_M_ode)
       });
 
-      // Release arrow keys → altitude recenters to 0 (= hover PWM). Analog-stick feel.
+      // Release arrow keys → altitude/yaw recenters to neutral. Analog-stick feel.
       $(document).keyup(function(e) {
           if(e.which == 38 || e.which == 40) { altitudeCenter(); e.preventDefault() }
+          if(e.which == 37 || e.which == 39) { angleCenter(); e.preventDefault() }
+          if(e.which == 74 || e.which == 76) { rollCenter(); e.preventDefault() }
       });
 
       $('#mode_select').on('change', function () {
@@ -243,6 +250,7 @@ var driveHandler = new function() {
         +   'background:#222;color:#eee;border-radius:4px;'
         +   'font-family:monospace;font-size:14px;">'
         +   '<div style="font-weight:bold;margin-bottom:4px;">RC PWM (μs)</div>'
+        +   '<div>roll (left/right): <span id="rc-roll">----</span></div>'
         +   '<div>pitch (fwd/back): <span id="rc-pitch">----</span></div>'
         +   '<div>yaw (turn):       <span id="rc-yaw">----</span></div>'
         +   '<div>throttle (motor): <span id="rc-throttle">----</span></div>'
@@ -256,6 +264,7 @@ var driveHandler = new function() {
     };
 
     var updateRcUI = function() {
+      $('#rc-roll').text(state.rc.roll);
       $('#rc-pitch').text(state.rc.pitch);
       $('#rc-yaw').text(state.rc.yaw);
       $('#rc-throttle').text(state.rc.throttle);
@@ -362,7 +371,7 @@ var driveHandler = new function() {
       //drawLine(state.tele.user.angle, state.tele.user.throttle)
     };
 
-    const ALL_POST_FIELDS = ['angle', 'throttle', 'altitude', 'drive_mode', 'recording', 'buttons'];
+    const ALL_POST_FIELDS = ['angle', 'throttle', 'roll', 'altitude', 'drive_mode', 'recording', 'buttons'];
 
     //
     // Set any changed properties to the server
@@ -379,6 +388,7 @@ var driveHandler = new function() {
             switch (field) {
                 case 'angle': data['angle'] = state.tele.user.angle; break;
                 case 'throttle': data['throttle'] = state.tele.user.throttle; break;
+                case 'roll': data['roll'] = state.tele.user.roll; break;
                 case 'altitude': data['altitude'] = state.tele.user.altitude; break;
                 case 'drive_mode': data['drive_mode'] = state.driveMode; break;
                 case 'recording': data['recording'] = state.recording; break;
@@ -408,6 +418,7 @@ var driveHandler = new function() {
     // Mode 2 quadcopter stick layout (Xbox/PS controllers via HTML5 Gamepad API):
     //   left stick X  (axes[0]) → yaw      (steering)
     //   left stick Y  (axes[1]) → altitude (up = climb)
+    //   right stick X (axes[2]) → roll
     //   right stick Y (axes[3]) → pitch    (forward = throttle)
     //   A button (buttons[0])   → brake (zero controls + brakeOn)
     //   Y button (buttons[3])   → cycle drive mode (rising edge)
@@ -429,6 +440,7 @@ var driveHandler = new function() {
 
         var yaw   = applyDeadzone(pad.axes[0], 0.10);
         var alt   = applyDeadzone(-pad.axes[1], 0.10);
+        var roll  = applyDeadzone(pad.axes[2], 0.10);
         var pitch = applyDeadzone(-pad.axes[3], 0.10);
 
         var aPressed = pad.buttons[0] && pad.buttons[0].pressed;
@@ -437,15 +449,17 @@ var driveHandler = new function() {
         if (aPressed) {
           state.tele.user.angle = 0;
           state.tele.user.throttle = 0;
+          state.tele.user.roll = 0;
           state.tele.user.altitude = 0;
           state.brakeOn = true;
           state.recording = false;
         } else {
           state.tele.user.angle = yaw;
           state.tele.user.throttle = limitedThrottle(pitch);
+          state.tele.user.roll = Math.max(-1, Math.min(1, roll));
           state.tele.user.altitude = Math.max(-1, Math.min(1, alt));
 
-          var anyInput = (yaw != 0 || pitch != 0 || alt != 0);
+          var anyInput = (yaw != 0 || pitch != 0 || roll != 0 || alt != 0);
           state.brakeOn = !anyInput;
           state.recording = anyInput;
         }
@@ -549,6 +563,26 @@ var driveHandler = new function() {
       postDrive()
     };
 
+    var angleCenter = function(){
+      state.tele.user.angle = 0
+      postDrive()
+    };
+
+    var rollLeft = function(){
+      state.tele.user.roll = Math.max(state.tele.user.roll - .1, -1)
+      postDrive()
+    };
+
+    var rollRight = function(){
+      state.tele.user.roll = Math.min(state.tele.user.roll + .1, 1)
+      postDrive()
+    };
+
+    var rollCenter = function(){
+      state.tele.user.roll = 0
+      postDrive()
+    };
+
     // Altitude is bipolar [-1, 1] where 0 = hover. Larger increments give
     // responsive stick feel; release (keyup) snaps back to 0.
     var altitudeUp = function(){
@@ -606,6 +640,7 @@ var driveHandler = new function() {
           console.log('post drive: ' + i)
           state.tele.user.angle = 0
           state.tele.user.throttle = 0
+          state.tele.user.roll = 0
           state.tele.user.altitude = 0
           state.recording = false
           state.driveMode = 'user';
@@ -802,4 +837,3 @@ function remap( x, oMin, oMax, nMin, nMax ){
 
 return result;
 }
-

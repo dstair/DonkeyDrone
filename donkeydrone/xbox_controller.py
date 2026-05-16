@@ -7,19 +7,20 @@ Why the bridge: Apple's `com.apple.gamecontroller.driver.XboxGamepad` dext
 claims exclusive HID ownership of Xbox controllers on modern macOS, which
 prevents pygame/SDL/hidapi from seeing inputs. The only supported path is
 GameController.framework from a real .app bundle. `xbox_bridge/main.swift`
-is that bundle; it sends 18-byte frames at 60Hz to /tmp/donkeydrone_xbox.sock
-and this part binds the receiving end.
+is that bundle; it sends controller frames at 60Hz to
+/tmp/donkeydrone_xbox.sock and this part binds the receiving end.
 
-Frame format (18 bytes, little-endian, matches xbox_bridge/main.swift):
-    float32 leftY, float32 rightX, float32 rightY, float32 rightTrigger,
+Frame format (22 bytes, little-endian, matches xbox_bridge/main.swift):
+    float32 leftX, float32 leftY, float32 rightX, float32 rightY, float32 rightTrigger,
     uint8 buttons (bit0=A, bit1=B), uint8 connected (1/0)
 
 GameController.framework axis convention is **stick-up = +1** (opposite of
 SDL/pygame), so neither lY nor rY is negated here.
 
 Stick mapping:
-    Right stick X → user/steering   (yaw)
+    Left  stick X → user/steering   (yaw)
     Right stick Y → user/throttle   (forward pitch, +1 = stick up = forward)
+    Right stick X → user/roll       (lateral bank)
     Left  stick Y → user/altitude   (analog, +1 = stick up = climb)
 
 Buttons / triggers:
@@ -43,8 +44,10 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SOCK_PATH = os.environ.get(
     "DONKEYDRONE_XBOX_SOCK", "/tmp/donkeydrone_xbox.sock"
 )
-_FRAME_FMT = "<ffffBB"
+_FRAME_FMT = "<fffffBB"
 _FRAME_SIZE = struct.calcsize(_FRAME_FMT)
+_LEGACY_FRAME_FMT = "<ffffBB"
+_LEGACY_FRAME_SIZE = struct.calcsize(_LEGACY_FRAME_FMT)
 
 # Tick-based stale-frame detection. The bridge sends at 60Hz; the vehicle
 # loop runs at DRIVE_LOOP_HZ (typically 30Hz). After this many ticks with no
@@ -65,6 +68,7 @@ class XboxDroneController:
         deadzone=0.08,
         steering_scale=1.0,
         throttle_scale=1.0,
+        roll_scale=1.0,
         altitude_scale=1.0,
         arm_threshold=0.5,
         socket_path=_DEFAULT_SOCK_PATH,
@@ -72,12 +76,14 @@ class XboxDroneController:
         self.deadzone = float(deadzone)
         self.steering_scale = float(steering_scale)
         self.throttle_scale = float(throttle_scale)
+        self.roll_scale = float(roll_scale)
         self.altitude_scale = float(altitude_scale)
         self.arm_threshold = float(arm_threshold)
         self.socket_path = socket_path
 
         self.steering = 0.0
         self.throttle = 0.0
+        self.roll = 0.0
         self.altitude = 0.0
         self.mode = self.MODES[0]
         self.recording = False
@@ -90,6 +96,8 @@ class XboxDroneController:
         self._tick = 0
         self._ticks_since_frame = _STALE_TICK_THRESHOLD + 1
         self._frames_seen = 0
+        self._legacy_frames_seen = 0
+        self._legacy_frame_warning_logged = False
         self._bridge_connected = False
 
         try:
@@ -120,6 +128,15 @@ class XboxDroneController:
                 break
             if len(data) >= _FRAME_SIZE:
                 latest = struct.unpack(_FRAME_FMT, data[:_FRAME_SIZE])
+            elif len(data) >= _LEGACY_FRAME_SIZE:
+                # Older XboxBridge.app builds sent no left-stick X. Preserve
+                # the old flight behavior by treating right-stick X as yaw and
+                # leaving roll centered until the app is rebuilt.
+                lY, rX, rY, rT, btns, conn = struct.unpack(
+                    _LEGACY_FRAME_FMT, data[:_LEGACY_FRAME_SIZE]
+                )
+                latest = (rX, lY, 0.0, rY, rT, btns, conn)
+                self._legacy_frames_seen += 1
         return latest
 
     def run(self):
@@ -129,8 +146,14 @@ class XboxDroneController:
         if frame is not None:
             self._frames_seen += 1
             self._ticks_since_frame = 0
-            lY, rX, rY, rT, btns, conn = frame
+            lX, lY, rX, rY, rT, btns, conn = frame
             self._bridge_connected = bool(conn)
+            if self._legacy_frames_seen and not self._legacy_frame_warning_logged:
+                logger.warning(
+                    "XboxBridge.app is sending legacy 18-byte frames; roll is "
+                    "centered until you rebuild it with xbox_bridge/build.sh"
+                )
+                self._legacy_frame_warning_logged = True
         else:
             self._ticks_since_frame += 1
 
@@ -140,6 +163,7 @@ class XboxDroneController:
             # zero stick outputs and disarm. Mode/recording state is sticky.
             self.steering = 0.0
             self.throttle = 0.0
+            self.roll = 0.0
             self.altitude = 0.0
             self.armed = False
             self._prev_a = False
@@ -154,23 +178,27 @@ class XboxDroneController:
                 else:
                     logger.info("XboxBridge connected but no controller")
             return (
-                self.steering, self.throttle, self.altitude,
+                self.steering, self.throttle, self.roll, self.altitude,
                 self.mode, self.recording, self.armed,
             )
 
         # frame is guaranteed non-None below (we just returned otherwise).
-        lY, rX, rY, rT, btns, _conn = frame  # type: ignore[misc]
+        lX, lY, rX, rY, rT, btns, _conn = frame  # type: ignore[misc]
         btn_a = bool(btns & 0x01)
         btn_b = bool(btns & 0x02)
 
         self.steering = max(
             -1.0,
-            min(1.0, self._apply_deadzone(rX) * self.steering_scale),
+            min(1.0, self._apply_deadzone(lX) * self.steering_scale),
         )
         # GameController convention: stick up = +1. No negation needed.
         self.throttle = max(
             -1.0,
             min(1.0, self._apply_deadzone(rY) * self.throttle_scale),
+        )
+        self.roll = max(
+            -1.0,
+            min(1.0, self._apply_deadzone(rX) * self.roll_scale),
         )
         self.altitude = max(
             -1.0,
@@ -201,15 +229,15 @@ class XboxDroneController:
 
         if self._tick % 90 == 0:
             logger.info(
-                "xbox raw: lY=%+.2f rX=%+.2f rY=%+.2f rT=%+.2f → "
-                "steer=%+.2f thr=%+.2f alt=%+.2f armed=%s (frames=%d)",
-                lY, rX, rY, rT,
-                self.steering, self.throttle, self.altitude, self.armed,
+                "xbox raw: lX=%+.2f lY=%+.2f rX=%+.2f rY=%+.2f rT=%+.2f → "
+                "yaw=%+.2f pitch=%+.2f roll=%+.2f alt=%+.2f armed=%s (frames=%d)",
+                lX, lY, rX, rY, rT,
+                self.steering, self.throttle, self.roll, self.altitude, self.armed,
                 self._frames_seen,
             )
 
         return (
-            self.steering, self.throttle, self.altitude,
+            self.steering, self.throttle, self.roll, self.altitude,
             self.mode, self.recording, self.armed,
         )
 

@@ -17,7 +17,7 @@ import time
 SOCK = "/tmp/donkeydrone_xbox.sock"
 APP = os.path.join(os.path.dirname(os.path.realpath(__file__)),
                    "build", "XboxBridge.app")
-FMT = "<ffffBB"
+FMT = "<fffffBB"
 SIZE = struct.calcsize(FMT)
 
 
@@ -46,8 +46,8 @@ def main():
             if len(data) >= SIZE:
                 last_frame = struct.unpack(FMT, data[:SIZE])
                 rx_count += 1
-                lY, rX, rY, rT, btns, conn = last_frame
-                if abs(lY) + abs(rX) + abs(rY) + rT > 0.01 or btns:
+                lX, lY, rX, rY, rT, btns, conn = last_frame
+                if abs(lX) + abs(lY) + abs(rX) + abs(rY) + rT > 0.01 or btns:
                     nonzero_seen = True
         except (BlockingIOError, OSError):
             pass
@@ -57,12 +57,12 @@ def main():
             if last_frame is None:
                 print("(no frames yet)")
             else:
-                lY, rX, rY, rT, btns, conn = last_frame
+                lX, lY, rX, rY, rT, btns, conn = last_frame
                 a = "A" if btns & 1 else "-"
                 b = "B" if btns & 2 else "-"
-                marker = "  <-- INPUT!" if (abs(lY)+abs(rX)+abs(rY)+rT > 0.01 or btns) else ""
+                marker = "  <-- INPUT!" if (abs(lX)+abs(lY)+abs(rX)+abs(rY)+rT > 0.01 or btns) else ""
                 print(f"rx={rx_count:4d} conn={conn} "
-                      f"lY={lY:+.2f} rX={rX:+.2f} rY={rY:+.2f} "
+                      f"lX={lX:+.2f} lY={lY:+.2f} rX={rX:+.2f} rY={rY:+.2f} "
                       f"rT={rT:.2f} {a}{b}{marker}")
     print(f"DONE. nonzero_input_seen={nonzero_seen}")
     print("done")

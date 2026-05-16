@@ -2,12 +2,12 @@
 DroneGymEnv - DonkeyCar part wrapping BetaFlight SITL + Gazebo.
 
 This part connects to a BetaFlight SITL instance via UDP RC channel packets
-and provides the same interface as DonkeyGymEnv: it accepts (steering, throttle,
-altitude) inputs and produces camera images + telemetry outputs.
+and accepts yaw, pitch, roll, and altitude inputs.
 
 The semantic mapping is (BetaFlight Angle mode):
     steering [-1, 1]  ->  yaw rate
     throttle [-1, 1]  ->  forward pitch (tilt angle)
+    roll [-1, 1]      ->  lateral roll (bank angle)
     altitude [-1, 1]  ->  motor throttle (direct power, no PID)
 
 Camera sources (set DRONE_CAMERA_SOURCE in your drone_config_XXmm.py):
@@ -57,11 +57,11 @@ class DroneGymEnv:
 
     This is a threaded part: update() runs the BetaFlight control loop in a
     background thread, while run_threaded() is called by the Vehicle loop to
-    exchange steering/throttle/altitude commands and camera images.
+    exchange yaw/pitch/roll/altitude commands and camera images.
 
     Usage in manage.py:
         gym = DroneGymEnv(cfg)
-        V.add(gym, inputs=['steering', 'throttle', 'altitude'],
+        V.add(gym, inputs=['steering', 'throttle', 'roll', 'altitude'],
               outputs=['cam/image_array', ...], threaded=True)
     """
 
@@ -144,12 +144,14 @@ class DroneGymEnv:
         # Shared state between threads
         self.steering = 0.0
         self.throttle = 0.0
+        self.roll = 0.0
         self.altitude = 0.0  # altitude control input [-1, 1] → motor throttle
         # Arm signal from user/arm. None = legacy auto-arm (always armed after
         # boot disarm phase). True/False = explicit arm control (e.g. RT trigger).
         self.user_arm = None
         self._prev_user_arm = None
         self._explicit_arm_started_at = None
+        self.last_roll_pwm = 1500
         self.last_pitch_pwm = 1500
         self.last_yaw_pwm = 1500
         self.last_throttle_pwm = 1000
@@ -311,10 +313,10 @@ class DroneGymEnv:
             logger.warning("RC send failed: %s", e)
 
     def _map_controls_to_rc(self):
-        """Convert steering/throttle/altitude [-1,1] to 16 RC PWM channels [1000-2000].
+        """Convert yaw/pitch/roll/altitude [-1,1] to 16 RC PWM channels [1000-2000].
 
         BetaFlight Angle mode channel mapping:
-            CH1 (roll):     1500 (centered, no lateral movement)
+            CH1 (roll):     1500 + roll * 500 * sensitivity
             CH2 (pitch):    1500 + throttle * 500 * sensitivity (forward tilt)
             CH3 (throttle): bipolar — altitude in [-1,1] → hover_throttle ± throttle_range.
                             altitude=0 → hover PWM (drone holds altitude in sim where
@@ -328,11 +330,12 @@ class DroneGymEnv:
         """
         channels = [1000] * 16
 
-        # Sensitivity scales pitch/yaw stick deflection.
+        # Sensitivity scales roll/pitch stick deflection.
         deflection = 500 * self.input_sensitivity
 
-        # CH1: roll (centered)
-        channels[0] = 1500
+        # CH1: roll (lateral bank)
+        roll = max(-1.0, min(1.0, self.roll))
+        channels[0] = int(max(1000, min(2000, 1500 + roll * deflection)))
 
         # CH2: pitch (forward tilt from throttle input)
         channels[1] = int(max(1000, min(2000, 1500 + self.throttle * deflection)))
@@ -392,6 +395,7 @@ class DroneGymEnv:
         channels[self.mode_channel] = 2000 if self.angle_mode else 1000
 
         # Snapshot for telemetry / UI display
+        self.last_roll_pwm = channels[0]
         self.last_pitch_pwm = channels[1]
         self.last_throttle_pwm = channels[2]
         self.last_yaw_pwm = channels[3]
@@ -588,12 +592,14 @@ class DroneGymEnv:
             loop_count += 1
             if loop_count % 100 == 0:
                 logger.info(
-                    "rc: steer=%.2f thr=%.2f alt=%.2f mode=%s → "
-                    "pitch=%d yaw=%d throttle=%d ch%d=%d ch%d=%d",
+                    "rc: yaw=%.2f pitch=%.2f roll=%.2f alt=%.2f mode=%s → "
+                    "roll_pwm=%d pitch=%d yaw=%d throttle=%d ch%d=%d ch%d=%d",
                     self.steering,
                     self.throttle,
+                    self.roll,
                     self.altitude,
                     "ANGLE" if self.angle_mode else "ACRO",
+                    channels[0],
                     channels[1],
                     channels[3],
                     channels[2],
@@ -659,12 +665,13 @@ class DroneGymEnv:
         except Exception as e:
             logger.error("BetaFlight loop error: %s", e)
 
-    def run_threaded(self, steering, throttle, altitude, user_arm=None):
+    def run_threaded(self, steering, throttle, roll, altitude, user_arm=None):
         """
         Called by the DonkeyCar Vehicle loop each frame.
 
         :param steering: normalized steering [-1, 1], mapped to yaw rate
         :param throttle: normalized throttle [-1, 1], mapped to forward pitch
+        :param roll: normalized roll [-1, 1], mapped to lateral bank
         :param altitude: normalized altitude [-1, 1], mapped to motor throttle
         :param user_arm: optional bool. None = legacy auto-arm; True/False =
                          explicit arm switch (e.g. Xbox RT deadman).
@@ -693,11 +700,14 @@ class DroneGymEnv:
             steering = 0.0
         if throttle is None:
             throttle = 0.0
+        if roll is None:
+            roll = 0.0
         if altitude is None:
             altitude = 0.0
 
         self.steering = float(steering)
         self.throttle = float(throttle)
+        self.roll = float(roll)
         self.altitude = float(altitude)
         self.user_arm = user_arm if isinstance(user_arm, bool) else None
         if self.user_arm is True and self._prev_user_arm is not True:
@@ -739,6 +749,7 @@ class DroneGymEnv:
 
         outputs = [
             output_frame,
+            self.last_roll_pwm,
             self.last_pitch_pwm,
             self.last_yaw_pwm,
             self.last_throttle_pwm,

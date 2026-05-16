@@ -32,9 +32,9 @@ def run_smoke_test():
     # Vision Input: (B, 3, H, W) | IMU Input: (B, Seq, 6)
     dummy_input = torch.randn(batch_size, 3, image_h, image_w).to(device)
     dummy_imu = torch.randn(batch_size, imu_seq_len, 6).to(device)
-    dummy_prev_ctrl = torch.randn(batch_size, 3).to(device)
-    # Labels: (B, 3) -> [steering, throttle, altitude]
-    dummy_labels = torch.randn(batch_size, 3).to(device)
+    dummy_prev_ctrl = torch.randn(batch_size, 4).to(device)
+    # Labels: (B, 4) -> [yaw, pitch, roll, altitude]
+    dummy_labels = torch.randn(batch_size, 4).to(device)
 
     # 3. Training Loop Smoke Test
     print(f"Performing 10 training iterations...")

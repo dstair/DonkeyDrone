@@ -9,7 +9,7 @@ Features:
 - Global Average Pooling to reduce parameter count.
 
 Input:  (B, 3, H, W) float32 [0, 1]
-Output: (B, 3) — [steering, throttle, altitude]
+Output: (B, 4) — [yaw, pitch, roll, altitude]
 """
 
 import torch
@@ -62,12 +62,12 @@ class ResidualBlock(nn.Module):
 
 
 class LinearModel(nn.Module):
-    def __init__(self, input_shape=(3, 120, 160), imu_shape=(3, 6), control_dim=3):
+    def __init__(self, input_shape=(3, 120, 160), imu_shape=(3, 6), control_dim=4):
         """
         Args:
             input_shape: (C, H, W) image dimensions.
             imu_shape: (Sequence Length, Channels) e.g., (3, 6) for 3 steps of [accel, gyro].
-            control_dim: Dimension of previous controls (steering, throttle, altitude).
+            control_dim: Dimension of previous controls (yaw, pitch, roll, altitude).
         """
         super().__init__()
         
@@ -115,7 +115,7 @@ class LinearModel(nn.Module):
             nn.Dropout(0.1),
             nn.Linear(128, 64),
             nn.GELU(),
-            nn.Linear(64, 3)
+            nn.Linear(64, 4)
         )
 
     def forward(self, img, imu, prev_ctrl=None):
@@ -134,7 +134,7 @@ class LinearModel(nn.Module):
         imu_feat = h_n[-1] # Shape: (Batch, hidden_dim)
 
         if prev_ctrl is None:
-            prev_ctrl = torch.zeros(img.shape[0], 3, device=img.device, dtype=img.dtype)
+            prev_ctrl = torch.zeros(img.shape[0], 4, device=img.device, dtype=img.dtype)
 
         # Control Feedback branch
         ctrl_feat = self.ctrl_fc(prev_ctrl)

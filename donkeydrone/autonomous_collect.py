@@ -23,13 +23,14 @@ from tub_schema import DRONE_TUB_INPUTS, DRONE_TUB_TYPES
 
 
 def _flight_command(t):
-    """Small bounded script that creates useful yaw/pitch/altitude labels."""
+    """Small bounded script that creates useful yaw/pitch/roll/altitude labels."""
     if t < 2.0:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
 
     phase = t - 2.0
     steering = 0.55 * math.sin(phase * 0.55)
     throttle = 0.25 + 0.12 * math.sin(phase * 0.23)
+    roll = 0.35 * math.sin(phase * 0.41)
     altitude = 0.25 * math.sin(phase * 0.35)
 
     # Every few seconds, briefly straighten out so the tub has recovery data.
@@ -37,9 +38,10 @@ def _flight_command(t):
     if cycle > 6.5:
         steering *= 0.25
         throttle = 0.05
+        roll *= 0.25
         altitude = -0.15
 
-    return steering, throttle, altitude
+    return steering, throttle, roll, altitude
 
 
 def _wait_for_tcp(host, port, timeout_s, label):
@@ -63,7 +65,7 @@ def _wait_for_ready(env, timeout_s):
     last_status = None
 
     while time.time() < deadline:
-        outputs = env.run_threaded(0.0, 0.0, 0.0)
+        outputs = env.run_threaded(0.0, 0.0, 0.0, 0.0)
         image = outputs[0]
         camera_ready = bool(np.any(image))
         control_ready = env.last_throttle_pwm >= env.hover_throttle - env.throttle_range
@@ -117,7 +119,7 @@ def collect(cfg, args):
         print(f"Settling at hover: {args.warmup:.1f}s")
         settle_start = time.time()
         while time.time() - settle_start < args.warmup:
-            env.run_threaded(0.0, 0.0, 0.0)
+            env.run_threaded(0.0, 0.0, 0.0, 0.0)
             time.sleep(0.02)
 
         tub_path = TubHandler(path=cfg.DATA_PATH).create_tub_path()
@@ -129,16 +131,17 @@ def collect(cfg, args):
         next_tick = collect_start
         while time.time() - collect_start < args.duration:
             t = time.time() - collect_start
-            steering, throttle, altitude = _flight_command(t)
-            env_outputs = env.run_threaded(steering, throttle, altitude)
+            steering, throttle, roll, altitude = _flight_command(t)
+            env_outputs = env.run_threaded(steering, throttle, roll, altitude)
             image = env_outputs[0]
-            telemetry = env_outputs[4:]
+            telemetry = env_outputs[5:]
             if not np.any(image):
                 blank_frames += 1
             tub_writer.run(
                 image,
                 steering,
                 throttle,
+                roll,
                 altitude,
                 "user",
                 *telemetry,
@@ -151,7 +154,7 @@ def collect(cfg, args):
     finally:
         if tub_writer is not None:
             tub_writer.shutdown()
-        env.run_threaded(0.0, 0.0, -1.0)
+        env.run_threaded(0.0, 0.0, 0.0, -1.0)
         time.sleep(0.5)
         env.shutdown()
         update_thread.join(timeout=3.0)

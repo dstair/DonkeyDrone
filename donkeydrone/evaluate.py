@@ -14,7 +14,7 @@ from dataset import TubDataset
 from torch_model import LinearModel, ResidualBlock
 
 
-AXES = ("Steering", "Throttle", "Altitude")
+AXES = ("Yaw", "Pitch", "Roll", "Altitude")
 DEFAULT_BENCHMARK_TUBS = ("data/tub_209_26-05-09",)
 BENCHMARK_ENV = "DONKEYDRONE_BENCHMARK_TUBS"
 
@@ -172,8 +172,8 @@ def parse_weights(value):
         weights = np.asarray([float(v.strip()) for v in value.split(",")], dtype=np.float32)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("weights must be comma-separated numbers") from exc
-    if weights.shape != (3,):
-        raise argparse.ArgumentTypeError("weights must contain exactly three values")
+    if weights.shape != (4,):
+        raise argparse.ArgumentTypeError("weights must contain exactly four values")
     if np.any(weights < 0) or np.sum(weights) == 0:
         raise argparse.ArgumentTypeError("weights must be nonnegative and not all zero")
     return weights
@@ -224,7 +224,7 @@ def evaluate_model(
     mae = np.mean(np.abs(preds - targets), axis=0)
     rmse = np.sqrt(np.mean(np.square(preds - targets), axis=0))
     correlations = safe_corrcoef(preds, targets)
-    jitter = np.mean(np.abs(np.diff(preds, axis=0)), axis=0) if len(preds) > 1 else np.zeros(3)
+    jitter = np.mean(np.abs(np.diff(preds, axis=0)), axis=0) if len(preds) > 1 else np.zeros(len(AXES))
     return {
         "samples": len(dataset),
         "missing_imu_records": dataset.missing_imu_records,
@@ -300,8 +300,8 @@ def main():
     parser.add_argument(
         "--weights",
         type=parse_weights,
-        default=parse_weights("1,1,1"),
-        help="Comma-separated MAE score weights for steering,throttle,altitude",
+        default=parse_weights("1,1,1,1"),
+        help="Comma-separated MAE score weights for yaw,pitch,roll,altitude",
     )
     parser.add_argument("--json-output", help="Optional path for machine-readable metrics JSON")
     args = parser.parse_args()
@@ -313,7 +313,7 @@ def main():
     device = get_device()
     print(f"Device: {device}")
     print(f"Benchmark ({tub_source}): {', '.join(tub_paths)}")
-    print(f"Weights: {args.weights[0]:g},{args.weights[1]:g},{args.weights[2]:g}")
+    print(f"Weights: {','.join(f'{w:g}' for w in args.weights)}")
 
     kwargs = {
         "image_h": args.image_h,

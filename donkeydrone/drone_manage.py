@@ -19,6 +19,7 @@ Options:
                             [default: drone_config_65mm.py]
 """
 
+import json
 import os
 from docopt import docopt
 
@@ -36,6 +37,7 @@ from donkeycar.parts.controller import (
     WebFpv,
     JoystickController,
 )
+from donkeycar.parts.web_controller.web import latch_buttons
 from donkeycar.parts.throttle_filter import ThrottleFilter
 from donkeycar.parts.behavior import BehaviorPart
 from donkeycar.parts.file_watcher import FileWatcher
@@ -67,6 +69,39 @@ class LocalWebController(_LocalWebController):
         local_static = os.path.join(this_dir, "templates", "static")
 
         super().__init__(*args, **kwargs)
+        self.roll = 0.0
+
+        import tornado.websocket
+        from tornado.routing import URLSpec
+
+        class _DroneWebSocketDriveAPI(tornado.websocket.WebSocketHandler):
+            def check_origin(self, origin):
+                return True
+
+            def open(self):
+                logger.info("New client connected")
+                self.application.wsclients.append(self)
+
+            def on_message(self, message):
+                data = json.loads(message)
+                self.application.angle = data.get("angle", self.application.angle)
+                self.application.throttle = data.get("throttle", self.application.throttle)
+                self.application.roll = data.get("roll", self.application.roll)
+                self.application.altitude = data.get("altitude", self.application.altitude)
+                if data.get("drive_mode") is not None:
+                    self.application.mode = data["drive_mode"]
+                    self.application.mode_latch = self.application.mode
+                if data.get("recording") is not None:
+                    self.application.recording = data["recording"]
+                    self.application.recording_latch = self.application.recording
+                if data.get("buttons") is not None:
+                    latch_buttons(self.application.buttons, data["buttons"])
+
+            def on_close(self):
+                logger.info("Client disconnected")
+                self.application.wsclients.remove(self)
+
+        self.default_router.rules.insert(0, URLSpec(r"/wsDrive", _DroneWebSocketDriveAPI))
 
         # Donkeycar's parent registered /static/ at its own templates/static.
         # We want local files (e.g. our patched main.js) to take precedence
@@ -97,7 +132,7 @@ class LocalWebController(_LocalWebController):
             # Insert before donkeycar's /static/ rule so we match first.
             self.default_router.rules.insert(0, spec)
 
-        self._last_rc = {"pitch": None, "yaw": None, "throttle": None}
+        self._last_rc = {"roll": None, "pitch": None, "yaw": None, "throttle": None}
 
     def run_threaded(
         self,
@@ -105,6 +140,7 @@ class LocalWebController(_LocalWebController):
         num_records=0,
         mode=None,
         recording=None,
+        rc_roll=None,
         rc_pitch=None,
         rc_yaw=None,
         rc_throttle=None,
@@ -119,6 +155,7 @@ class LocalWebController(_LocalWebController):
         # Broadcast PWMs only when they change to keep websocket traffic low.
         rc_changes = {}
         for key, val in (
+            ("roll", rc_roll),
             ("pitch", rc_pitch),
             ("yaw", rc_yaw),
             ("throttle", rc_throttle),
@@ -133,7 +170,8 @@ class LocalWebController(_LocalWebController):
         if rc_changes and self.loop is not None:
             self.loop.add_callback(lambda: self.update_wsclients({"rc": rc_changes}))
 
-        return result
+        angle, throttle, altitude, mode, recording, buttons = result
+        return angle, throttle, self.roll, altitude, mode, recording, buttons
 
     def run(self, *args, **kwargs):
         return self.run_threaded(*args, **kwargs)
@@ -163,8 +201,8 @@ def add_drone_sim(V, cfg):
     """
     gym = build_drone_env(cfg)
 
-    inputs = ["steering", "throttle", "altitude", "user/arm"]
-    outputs = ["cam/image_array", "rc/pitch", "rc/yaw", "rc/throttle"]
+    inputs = ["steering", "throttle", "roll", "altitude", "user/arm"]
+    outputs = ["cam/image_array", "rc/roll", "rc/pitch", "rc/yaw", "rc/throttle"]
 
     if cfg.DRONE_RECORD_POSITION:
         outputs += ["pos/pos_x", "pos/pos_y", "pos/pos_z"]
@@ -420,7 +458,7 @@ def drive(
                 inputs += IMU_KEYS
 
         # Model outputs
-        outputs = ["pilot/angle", "pilot/throttle", "pilot/altitude"]
+        outputs = ["pilot/angle", "pilot/throttle", "pilot/roll", "pilot/altitude"]
 
         if cfg.TRAIN_LOCALIZER:
             outputs.append("pilot/loc")
@@ -448,12 +486,14 @@ def drive(
             "user/mode",
             "user/angle",
             "user/throttle",
+            "user/roll",
             "user/altitude",
             "pilot/angle",
             "pilot/throttle",
+            "pilot/roll",
             "pilot/altitude",
         ],
-        outputs=["steering", "throttle", "altitude"],
+        outputs=["steering", "throttle", "roll", "altitude"],
     )
 
     if (cfg.CONTROLLER_TYPE != "pigpio_rc") and (cfg.CONTROLLER_TYPE != "MM1"):
@@ -502,8 +542,8 @@ def drive(
         types += ["float"] * len(IMU_KEYS)
 
     if cfg.RECORD_DURING_AI:
-        inputs += ["pilot/angle", "pilot/throttle", "pilot/altitude"]
-        types += ["float", "float", "float"]
+        inputs += ["pilot/angle", "pilot/throttle", "pilot/roll", "pilot/altitude"]
+        types += ["float", "float", "float", "float"]
 
     tub_path = (
         TubHandler(path=cfg.DATA_PATH).create_tub_path()
@@ -625,22 +665,31 @@ class DriveMode:
         mode,
         user_steering,
         user_throttle,
+        user_roll,
         user_altitude,
         pilot_steering,
         pilot_throttle,
+        pilot_roll,
         pilot_altitude,
     ):
         if mode == "user":
-            return user_steering, user_throttle, user_altitude if user_altitude else 0.0
+            return (
+                user_steering,
+                user_throttle,
+                user_roll if user_roll else 0.0,
+                user_altitude if user_altitude else 0.0,
+            )
         elif mode == "local_angle":
             return (
                 pilot_steering if pilot_steering else 0.0,
                 user_throttle,
+                user_roll if user_roll else 0.0,
                 user_altitude if user_altitude else 0.0,
             )
         return (
             pilot_steering if pilot_steering else 0.0,
             pilot_throttle * self.ai_throttle_mult if pilot_throttle else 0.0,
+            pilot_roll if pilot_roll else 0.0,
             pilot_altitude if pilot_altitude else 0.0,
         )
 
@@ -784,6 +833,7 @@ def add_user_controller(V, cfg, use_joystick, use_xbox=False, input_image="ui/im
             "tub/num_records",
             "user/mode",
             "recording",
+            "rc/roll",
             "rc/pitch",
             "rc/yaw",
             "rc/throttle",
@@ -791,6 +841,7 @@ def add_user_controller(V, cfg, use_joystick, use_xbox=False, input_image="ui/im
         outputs=[
             "user/steering",
             "user/throttle",
+            "user/roll",
             "user/altitude",
             "user/mode",
             "recording",
@@ -806,6 +857,7 @@ def add_user_controller(V, cfg, use_joystick, use_xbox=False, input_image="ui/im
             deadzone=getattr(cfg, "XBOX_DEADZONE", 0.08),
             steering_scale=getattr(cfg, "XBOX_STEERING_SCALE", 1.0),
             throttle_scale=getattr(cfg, "XBOX_THROTTLE_SCALE", 1.0),
+            roll_scale=getattr(cfg, "XBOX_ROLL_SCALE", 1.0),
             altitude_scale=getattr(cfg, "XBOX_ALTITUDE_SCALE", 1.0),
             arm_threshold=getattr(cfg, "XBOX_ARM_THRESHOLD", 0.5),
         )
@@ -814,6 +866,7 @@ def add_user_controller(V, cfg, use_joystick, use_xbox=False, input_image="ui/im
             outputs=[
                 "user/steering",
                 "user/throttle",
+                "user/roll",
                 "user/altitude",
                 "user/mode",
                 "recording",

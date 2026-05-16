@@ -1,7 +1,7 @@
 """
 TorchPilot — drop-in replacement for KerasLinear in the DonkeyCar vehicle loop.
 
-Implements the same run(img_arr) → (steering, throttle, altitude) interface.
+Implements the same run(img_arr) → (yaw, pitch, roll, altitude) interface.
 """
 
 import numpy as np
@@ -31,7 +31,7 @@ class TorchPilot:
         self.model = LinearModel(input_shape=input_shape, imu_shape=(seq_len, 6)).to(self.device)
         self.model.eval()
         self._imu_history = np.zeros((seq_len, 6), dtype=np.float32)
-        self._prev_ctrl = np.zeros(3, dtype=np.float32)
+        self._prev_ctrl = np.zeros(4, dtype=np.float32)
 
     def load(self, model_path):
         state_dict = torch.load(model_path, map_location=self.device, weights_only=True)
@@ -41,7 +41,7 @@ class TorchPilot:
 
     def run(self, img_arr, acl_x=0.0, acl_y=0.0, acl_z=0.0, gyr_x=0.0, gyr_y=0.0, gyr_z=0.0):
         if img_arr is None:
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.0
 
         # img_arr: (H, W, C) uint8 numpy array from camera
         arr = np.asarray(img_arr, dtype=np.float32) / 255.0
@@ -59,8 +59,9 @@ class TorchPilot:
         with torch.no_grad():
             output = self.model(tensor, imu_tensor, prev_ctrl_tensor)
 
-        steering = float(output[0, 0])
+        yaw = float(output[0, 0])
         throttle = float(output[0, 1])
-        altitude = float(output[0, 2])
-        self._prev_ctrl[:] = [steering, throttle, altitude]
-        return steering, throttle, altitude
+        roll = float(output[0, 2])
+        altitude = float(output[0, 3])
+        self._prev_ctrl[:] = [yaw, throttle, roll, altitude]
+        return yaw, throttle, roll, altitude

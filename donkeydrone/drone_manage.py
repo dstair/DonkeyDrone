@@ -633,6 +633,10 @@ def drive(
         thr_range = getattr(cfg, "DRONE_THROTTLE_RANGE", 300)
         max_pitch = getattr(cfg, "DRONE_MAX_PITCH_ANGLE", 25.0)
         max_roll = getattr(cfg, "DRONE_MAX_ROLL_ANGLE", max_pitch)
+        max_yaw = getattr(cfg, "DRONE_MAX_YAW_RATE", 90.0)
+        yaw_pwm_cap = getattr(cfg, "DRONE_YAW_PWM_CAP", None)
+        if yaw_pwm_cap is None:
+            yaw_pwm_cap = int(max(0, min(500, round(float(max_yaw) / 0.30))))
         delay_ms = getattr(cfg, "SIMULATED_DELAY_MS", 0)
         angle_mode = getattr(cfg, "DRONE_ANGLE_MODE", True)
         altitude_hold = getattr(cfg, "DRONE_ALTITUDE_HOLD_ENABLED", False)
@@ -643,7 +647,7 @@ def drive(
         print(f"  Alt hold:  {'on' if altitude_hold else 'off'}")
         print(f"  Max pitch: {max_pitch}°")
         print(f"  Max roll:  {max_roll}°")
-        print(f"  Max yaw:   {getattr(cfg, 'DRONE_MAX_YAW_RATE', 90.0)} deg/s")
+        print(f"  Max yaw:   {max_yaw} deg/s (CH4 ±{yaw_pwm_cap}us)")
         if delay_ms > 0:
             print(f"  Sim delay: {delay_ms}ms")
     print(f"  Web UI:    http://localhost:{cfg.WEB_CONTROL_PORT}")

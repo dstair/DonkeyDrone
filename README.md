@@ -397,6 +397,8 @@ X fix skating rink effect.
 
 X Angular drag: adding angular drag (e.g., velocity_decay <angular>) to the model.sdf or the BetaflightPlugin would contribute to more realistic rotational dynamics
 
+- Fix Yaw Speed.
+
 - Consider More Advanced Drag Models (Future Work):
 For even greater physical accuracy, especially at higher speeds, you could explore implementing a quadratic drag model (F = -0.5 * rho * A * Cd * v^2) within the BetaflightPlugin. This would provide a more realistic non-linear relationship between speed and drag force.
 

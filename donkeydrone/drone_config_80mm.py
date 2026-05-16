@@ -55,8 +55,10 @@ DRONE_THROTTLE_STEP_SIZE = (
     0.1  # keyboard step per keypress (deflection, snaps back to 0 on release)
 )
 
-# Max yaw rate scaling (steering input maps to yaw)
-DRONE_MAX_YAW_RATE = 180.0
+# Max yaw rate target for full yaw input. 120 deg/s is a 360-degree turn in
+# about 3 seconds. DroneGymEnv derives the CH4 PWM deflection from this unless
+# DRONE_YAW_PWM_CAP is set below.
+DRONE_MAX_YAW_RATE = 120.0
 
 
 DRONE_ANGLE_MODE=True # this appears to always set to Acro mode regardless of True/FLse
@@ -67,10 +69,10 @@ DRONE_YAW_THROTTLE_FEEDFORWARD = 0.0
 # 0.3 = gentler, easier-to-fly commands.
 DRONE_INPUT_SENSITIVITY = 0.4
 
-# CH4 yaw deflection cap in PWM microseconds from center (1500). Yaw input at
-# hover PWM produces net upward thrust via motor-mixer ω² asymmetry — larger
-# deflections make the drone climb on every turn. Keep this small (20–40).
-DRONE_YAW_PWM_CAP = 40
+# Optional CH4 yaw deflection cap in PWM microseconds from center (1500).
+# Leave as None so DRONE_MAX_YAW_RATE controls turn speed. Set an integer here
+# only when you want a hard safety cap regardless of the configured yaw rate.
+DRONE_YAW_PWM_CAP = None
 
 # ---- Altitude Hold (Vertical Velocity Damper) ----
 # Proportional gain (PWM per m/s): -k_pwm * vz added to throttle when

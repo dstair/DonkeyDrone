@@ -66,7 +66,7 @@ def build_drone_env(
         measure_loop_delay=getattr(cfg, "MEASURE_LOOP_DELAY", False),
         loop_delay_log_interval=getattr(cfg, "LOOP_DELAY_LOG_INTERVAL", 100),
         input_sensitivity=getattr(cfg, "DRONE_INPUT_SENSITIVITY", 1.0),
-        yaw_pwm_cap=getattr(cfg, "DRONE_YAW_PWM_CAP", 30),
+        yaw_pwm_cap=getattr(cfg, "DRONE_YAW_PWM_CAP", None),
         yaw_throttle_feedforward=getattr(cfg, "DRONE_YAW_THROTTLE_FEEDFORWARD", 0.0),
         altitude_hold_k=getattr(cfg, "DRONE_ALTITUDE_HOLD_K", 30.0),
         altitude_hold_deadband=getattr(cfg, "DRONE_ALTITUDE_HOLD_DEADBAND", 0.05),

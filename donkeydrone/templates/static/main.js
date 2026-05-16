@@ -158,8 +158,9 @@ var driveHandler = new function() {
           if(e.which == 77) { toggleDriveMode() } // 'm' toggle drive mode (_M_ode)
       });
 
-      // Release arrow keys → altitude/yaw recenters to neutral. Analog-stick feel.
+      // Release flight-control keys → axes recenter to neutral. Analog-stick feel.
       $(document).keyup(function(e) {
+          if(e.which == 73 || e.which == 75) { throttleCenter(); e.preventDefault() }
           if(e.which == 38 || e.which == 40) { altitudeCenter(); e.preventDefault() }
           if(e.which == 37 || e.which == 39) { angleCenter(); e.preventDefault() }
           if(e.which == 74 || e.which == 76) { rollCenter(); e.preventDefault() }
@@ -260,27 +261,98 @@ var driveHandler = new function() {
         +   'background:#000 !important;'
         + '}'
         + 'label, .control-label, .form-check-label { color:#eee !important; }'
-        + 'a { color:#8ab4ff; }';
+        + 'a { color:#8ab4ff; }'
+        + '#control-bars { display:none !important; }'
+        + '#rc-panel { margin-top:10px;padding:14px;background:#202020;color:#eee;'
+        +   'border-radius:4px;font-family:Menlo,Consolas,monospace;'
+        +   'box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }'
+        + '#rc-panel * { box-sizing:border-box; }'
+        + '.rc-header { display:flex;align-items:center;justify-content:space-between;gap:12px;'
+        +   'padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.10); }'
+        + '.rc-source { color:#f0f0f0;font-size:18px;font-weight:700; }'
+        + '.rc-status { min-width:118px;text-align:center;padding:5px 10px;border-radius:4px;'
+        +   'font-size:18px;font-weight:800;letter-spacing:.04em; }'
+        + '.rc-status.armed { background:#471b1b;color:#ff8a8a;box-shadow:inset 0 0 0 1px #cf5555; }'
+        + '.rc-status.disarmed { background:#18281f;color:#78e5a0;box-shadow:inset 0 0 0 1px #3c8f58; }'
+        + '.rc-meta { display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 12px;'
+        +   'font-size:13px;color:#ccc; }'
+        + '.rc-meta span { color:#fff; }'
+        + '.rc-sticks { display:grid;grid-template-columns:1fr 1fr;gap:12px; }'
+        + '.rc-stick-card { min-width:0; }'
+        + '.rc-stick-title { display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;'
+        +   'font-size:13px;color:#ddd; }'
+        + '.rc-stick-title strong { color:#fff; }'
+        + '.rc-stick { position:relative;width:100%;aspect-ratio:1 / 1;min-height:142px;'
+        +   'border-radius:4px;background:#101010;overflow:hidden;'
+        +   'box-shadow:inset 0 0 0 1px rgba(255,255,255,.16); }'
+        + '.rc-stick:before, .rc-stick:after { content:"";position:absolute;background:rgba(255,255,255,.16); }'
+        + '.rc-stick:before { left:50%;top:8px;bottom:8px;width:1px; }'
+        + '.rc-stick:after { top:50%;left:8px;right:8px;height:1px; }'
+        + '.rc-stick-fill { position:absolute;left:0;right:0;bottom:0;height:0%;'
+        +   'background:linear-gradient(0deg,rgba(108,204,255,.30),rgba(108,204,255,.06)); }'
+        + '.rc-stick-dot { position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;'
+        +   'border-radius:50%;background:#f5f5f5;box-shadow:0 0 0 3px rgba(102,138,237,.35);'
+        +   'transition:left .08s linear,top .08s linear; }'
+        + '.rc-axis-label { position:absolute;color:#aaa;font-size:11px;line-height:1;pointer-events:none; }'
+        + '.rc-axis-label.top { top:8px;left:50%;transform:translateX(-50%); }'
+        + '.rc-axis-label.bottom { bottom:8px;left:50%;transform:translateX(-50%); }'
+        + '.rc-axis-label.left { left:8px;top:50%;transform:translateY(-50%); }'
+        + '.rc-axis-label.right { right:8px;top:50%;transform:translateY(-50%); }'
+        + '.rc-values { display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-top:10px;'
+        +   'font-size:13px; }'
+        + '.rc-value { display:flex;justify-content:space-between;gap:8px;color:#bbb; }'
+        + '.rc-value span { color:#fff; }'
+        + '@media (max-width: 700px) {'
+        +   '.rc-header { align-items:flex-start;flex-direction:column; }'
+        +   '.rc-status { width:100%; }'
+        +   '.rc-meta, .rc-sticks, .rc-values { grid-template-columns:1fr; }'
+        + '}';
       $('head').append('<style id="donkeydrone-theme">' + css + '</style>');
     };
 
     var injectRcPanel = function() {
       if ($('#rc-panel').length) return;
       var html = ''
-        + '<div id="rc-panel" style="margin-top:10px;padding:8px;'
-        +   'background:#222;color:#eee;border-radius:4px;'
-        +   'font-family:monospace;font-size:14px;">'
-        +   '<div style="font-weight:bold;margin-bottom:4px;">RC PWM (μs)</div>'
-        +   '<div style="margin-bottom:6px;">BetaFlight: <span id="bf-status" '
-        +     'style="font-weight:bold;">UNKNOWN</span></div>'
-        +   '<div>active modes: <span id="bf-active-modes">----</span></div>'
-        +   '<div>arming flags: <span id="bf-arming-flags">----</span></div>'
-        +   '<div>roll (left/right): <span id="rc-roll">----</span></div>'
-        +   '<div>pitch (fwd/back): <span id="rc-pitch">----</span></div>'
-        +   '<div>yaw (turn):       <span id="rc-yaw">----</span></div>'
-        +   '<div>throttle (motor): <span id="rc-throttle">----</span></div>'
-        +   '<div>arm aux:          <span id="rc-arm">----</span></div>'
-        +   '<div>mode aux:         <span id="rc-mode">----</span></div>'
+        + '<div id="rc-panel">'
+        +   '<div class="rc-header">'
+        +     '<div class="rc-source">BetaFlight</div>'
+        +     '<div id="bf-status" class="rc-status disarmed">DISARMED</div>'
+        +   '</div>'
+        +   '<div class="rc-meta">'
+        +     '<div>active modes: <span id="bf-active-modes">----</span></div>'
+        +     '<div>arming flags: <span id="bf-arming-flags">----</span></div>'
+        +   '</div>'
+        +   '<div class="rc-sticks">'
+        +     '<div class="rc-stick-card">'
+        +       '<div class="rc-stick-title"><strong>Left stick</strong><span>throttle / yaw</span></div>'
+        +       '<div class="rc-stick" id="rc-left-stick">'
+        +         '<div id="rc-throttle-fill" class="rc-stick-fill"></div>'
+        +         '<div class="rc-axis-label top">throttle</div>'
+        +         '<div class="rc-axis-label bottom">idle</div>'
+        +         '<div class="rc-axis-label left">yaw</div>'
+        +         '<div class="rc-axis-label right">yaw</div>'
+        +         '<div id="rc-left-dot" class="rc-stick-dot"></div>'
+        +       '</div>'
+        +     '</div>'
+        +     '<div class="rc-stick-card">'
+        +       '<div class="rc-stick-title"><strong>Right stick</strong><span>pitch / roll</span></div>'
+        +       '<div class="rc-stick" id="rc-right-stick">'
+        +         '<div class="rc-axis-label top">pitch</div>'
+        +         '<div class="rc-axis-label bottom">back</div>'
+        +         '<div class="rc-axis-label left">roll</div>'
+        +         '<div class="rc-axis-label right">roll</div>'
+        +         '<div id="rc-right-dot" class="rc-stick-dot"></div>'
+        +       '</div>'
+        +     '</div>'
+        +   '</div>'
+        +   '<div class="rc-values">'
+        +     '<div class="rc-value">roll <span id="rc-roll">----</span></div>'
+        +     '<div class="rc-value">pitch <span id="rc-pitch">----</span></div>'
+        +     '<div class="rc-value">yaw <span id="rc-yaw">----</span></div>'
+        +     '<div class="rc-value">throttle <span id="rc-throttle">----</span></div>'
+        +     '<div class="rc-value">arm aux <span id="rc-arm">----</span></div>'
+        +     '<div class="rc-value">mode aux <span id="rc-mode">----</span></div>'
+        +   '</div>'
         + '</div>';
       var anchor = $('#control-bars');
       if (anchor.length) {
@@ -288,6 +360,21 @@ var driveHandler = new function() {
       } else {
         $('body').prepend(html);
       }
+    };
+
+    var clamp = function(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    };
+
+    var normalizedPwm = function(value, center, span) {
+      return clamp((parseFloat(value) - center) / span, -1, 1);
+    };
+
+    var updateStick = function(selector, x, y) {
+      $(selector).css({
+        left: ((x + 1) * 50) + '%',
+        top: ((1 - (y + 1) / 2) * 100) + '%',
+      });
     };
 
     var updateRcUI = function() {
@@ -301,13 +388,23 @@ var driveHandler = new function() {
       var status = state.bf.armed ? 'ARMED' : 'DISARMED';
       $('#bf-status')
         .text(status)
-        .css('color', state.bf.armed ? '#6ee779' : '#ff7070');
+        .toggleClass('armed', state.bf.armed)
+        .toggleClass('disarmed', !state.bf.armed);
       $('#bf-active-modes').text(state.bf.active_modes || '----');
       var flags = state.bf.arming_disable_flags || '';
       if (!flags && state.bf.arming_flags === 0) {
         flags = 'none';
       }
       $('#bf-arming-flags').text(flags || '----');
+
+      var yaw = normalizedPwm(state.rc.yaw, 1500, 500);
+      var roll = normalizedPwm(state.rc.roll, 1500, 500);
+      var pitch = normalizedPwm(state.rc.pitch, 1500, 500);
+      var throttle = clamp((parseFloat(state.rc.throttle) - 1000) / 1000, 0, 1);
+
+      updateStick('#rc-left-dot', yaw, (throttle * 2) - 1);
+      updateStick('#rc-right-dot', roll, pitch);
+      $('#rc-throttle-fill').css('height', (throttle * 100) + '%');
     };
 
     var updateUI = function() {
@@ -590,6 +687,11 @@ var driveHandler = new function() {
 
     var throttleDown = function(){
       state.tele.user.throttle = limitedThrottle(Math.max(state.tele.user.throttle - .05, -1));
+      postDrive()
+    };
+
+    var throttleCenter = function(){
+      state.tele.user.throttle = 0
       postDrive()
     };
 

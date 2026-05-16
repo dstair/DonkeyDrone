@@ -1276,6 +1276,8 @@ def main():
             hover_pwm=args.airborne_hover,
             climb_pwm=args.airborne_climb,
             climb_s=args.airborne_climb_s,
+            sample_s=args.airborne_phase_s,
+            yaw_pwm=args.yaw_pwm,
         )
 
     if args.mode == "inflight-hover":

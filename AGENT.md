@@ -1169,3 +1169,80 @@ uv run --env-file .env python -m py_compile \
   donkeydrone/drone_env.py donkeydrone/drone_gym.py
 bash -n scripts/test_thrust.sh scripts/start.sh scripts/stop_all.sh
 ```
+
+## Current Handoff (2026-05-16 angular drag)
+
+Added configurable angular drag on top of the translational-drag work.
+
+Implementation:
+- External SDFs now set `base_link` `<velocity_decay><angular>0.50</angular>`.
+- External SDF Betaflight plugin blocks now set `<angularVelocityDecay>0.50</angularVelocityDecay>`.
+- `~/dev/aeroloop_gazebo/plugins/BetaflightPlugin.cc` reads `angularVelocityDecay` and applies first-order angular damping:
+  - `torque = -k * I_world * omega_world`
+  - This mirrors the earlier horizontal plugin-backed drag because Bullet/Harmonic did not visibly honor SDF `velocity_decay` for linear damping.
+- `donkeydrone/test_thrust.py --mode=attitude` now passes through `--yaw-pwm` and `--airborne-phase-s`; previously attitude mode silently used its defaults.
+
+Selected angular value:
+- `angularVelocityDecay = 0.50 1/s`
+- Applied consistently to 65mm and 80mm.
+- The value is conservative: it did not materially reduce commanded yaw authority, but it adds passive rotational damping and slightly reduces already-small pitch/roll shake.
+
+Validation and measurements:
+```bash
+cmake --build /Users/Dan/dev/aeroloop_gazebo/plugins/build
+uv run --env-file .env python -m py_compile donkeydrone/test_thrust.py
+gz sdf -k /Users/Dan/dev/aeroloop_gazebo/models/betaloop_drone_cam_65mm/model.sdf
+gz sdf -k /Users/Dan/dev/aeroloop_gazebo/models/betaloop_drone_cam_80mm/model.sdf
+```
+
+Baseline before angular drag, attitude test effectively used `yaw_pwm=1530`:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=attitude \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --airborne-phase-s=4 --yaw-pwm=1540
+```
+- Due to missing argument plumbing, the run used `yaw=1530`, `sample_s=5.0`.
+- Baseline yaw-on roll: `std=0.01°`, `p2p=0.03°`
+- Baseline yaw-on pitch: `std=0.01°`, `p2p=0.06°`
+- Baseline yaw rate: `-6.8°/s`
+
+With angular `0.10`, normal yaw-cap test:
+- `yaw=1530`: roll `std=0.00°`, pitch `std=0.01°`, yaw rate `-6.9°/s`
+- `yaw=1600`: roll `std=0.01°`, pitch `std=0.01°`, yaw rate `-41.2°/s`
+- Conclusion: stable, but too small to have much visible effect.
+
+With selected angular `0.50`:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=attitude \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --airborne-phase-s=5 --yaw-pwm=1600
+```
+- Roll `std=0.00°`, `p2p=0.02°`
+- Pitch `std=0.00°`, `p2p=0.02°`
+- Yaw rate `-41.0°/s`
+
+Normal yaw-cap check:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=attitude \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --airborne-phase-s=5 --yaw-pwm=1530
+```
+- Roll `std=0.00°`, `p2p=0.01°`
+- Pitch `std=0.01°`, `p2p=0.04°`
+- Yaw rate `-7.2°/s`
+
+Regression checks with angular `0.50`:
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=damper-sim \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.0 \
+  --damper-k=45 --damper-sample-s=8
+```
+- Passed: total drift `+0.112m`; after-settle drift `-0.428m`; `alt_p2p=0.451m`; `vz_mean=-0.057m/s`.
+
+```bash
+./scripts/test_thrust.sh --airframe=80mm --mode=lateral-coast \
+  --airborne-hover=1475 --airborne-climb=1500 --airborne-climb-s=1.5 \
+  --lateral-roll-pwm=1700 --lateral-accel-s=1.5 --lateral-coast-s=6
+```
+- Peak `2.729 m/s`, final `0.736 m/s` after `6.6s`, drift `10.234m`, half-life `3.89s`.
+- This is close to the selected translational-drag result and keeps the lateral fix intact.

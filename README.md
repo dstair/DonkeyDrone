@@ -391,13 +391,14 @@ X clean up the UI. Want to show pitch, roll, yaw, and throttle.
   X add status indicator, i.e. ARMED
 X black background for donkeydrone UI
 
-- Address vertical climb issue.
-- fix skating rink effect.
+? Address vertical climb issue.
+? fix skating rink effect.
   - Test horizontalVelocityDecay of 0.35 
 - Angular drag: adding angular drag (e.g., velocity_decay <angular>) to the model.sdf or the BetaflightPlugin would contribute to more realistic rotational dynamics
 
 - Consider More Advanced Drag Models (Future Work):
 For even greater physical accuracy, especially at higher speeds, you could explore implementing a quadratic drag model (F = -0.5 * rho * A * Cd * v^2) within the BetaflightPlugin. This would provide a more realistic non-linear relationship between speed and drag force.
+
 
 
 - Add randomization of worlds (wall locations, colors) for better CNN training

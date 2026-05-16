@@ -17,6 +17,10 @@ Modes (`--mode`):
     hover    Fine sweep near hover (default 1450-1550, 5 PWM steps,
              2s per step) with altitude rate per PWM. Pick the PWM
              closest to 0 m/s rate as your DRONE_HOVER_THROTTLE.
+    lateral-coast
+             Climb, apply sideways roll for a few seconds, level roll, then
+             sample XY speed decay and drift distance. Used to quantify the
+             "skating rink" / missing translational drag effect.
     both     Run yaw test first, then thrust ramp (default).
 
 Easiest way to run (brings up the stack, runs the test, tears it down):
@@ -59,10 +63,12 @@ def send_rc(rc_sock, channels):
 FLIGHT_MODE_ANGLE = True  # set False for Acro (CH6 = 1000)
 
 
-def make_channels(throttle_pwm, armed=True, yaw_pwm=1500, pitch_pwm=1500):
-    """Create 16-channel RC packet with throttle, yaw, pitch, and arm/disarm."""
+def make_channels(
+    throttle_pwm, armed=True, yaw_pwm=1500, pitch_pwm=1500, roll_pwm=1500
+):
+    """Create 16-channel RC packet with throttle, roll/yaw/pitch, and arm/disarm."""
     channels = [1000] * 16
-    channels[0] = 1500  # CH1 roll (centered)
+    channels[0] = roll_pwm  # CH1 roll
     channels[1] = pitch_pwm  # CH2 pitch
     channels[2] = throttle_pwm  # CH3 throttle
     channels[3] = yaw_pwm  # CH4 yaw
@@ -646,6 +652,121 @@ def run_pitch_climb_test(
         logger.info("Verdict: %s", verdict)
 
 
+def run_lateral_coast_test(
+    rc_sock,
+    hover_pwm=1490,
+    climb_pwm=1550,
+    climb_s=3.0,
+    roll_pwm=2000,
+    accel_s=2.0,
+    coast_s=6.0,
+    dt=0.25,
+):
+    """Quantify lateral coasting after roll is leveled.
+
+    Phases:
+      A. Climb to altitude.
+      B. Apply sideways roll at hover throttle to build XY velocity.
+      C. Return roll to center and sample horizontal speed / distance.
+
+    With no translational drag, XY speed will decay slowly or not at all.
+    A realistic body-drag model should show a clear speed half-life after
+    leveling, even without active position hold.
+    """
+    logger.info(
+        "=== Lateral-coast test: hover=%d climb=%d roll=%d accel=%.1fs coast=%.1fs ===",
+        hover_pwm,
+        climb_pwm,
+        roll_pwm,
+        accel_s,
+        coast_s,
+    )
+
+    logger.info("A: climbing at CH3=%d for %.1fs", climb_pwm, climb_s)
+    hold(rc_sock, make_channels(climb_pwm, armed=True), climb_s)
+    pos = query_pose()
+    logger.info(
+        "A: position after climb = %s",
+        f"x={pos[0]:+.2f} y={pos[1]:+.2f} z={pos[2]:+.2f}m" if pos else "?",
+    )
+
+    logger.info(
+        "B: rolling sideways at CH1=%d, CH3=%d for %.1fs",
+        roll_pwm,
+        hover_pwm,
+        accel_s,
+    )
+    hold(
+        rc_sock,
+        make_channels(hover_pwm, armed=True, roll_pwm=roll_pwm),
+        accel_s,
+    )
+    pos0 = query_pose()
+    if pos0 is None:
+        logger.warning("No pose sample before coast — abort.")
+        return
+
+    logger.info(
+        "C: roll centered, sampling XY coast for %.1fs at %.1fHz",
+        coast_s,
+        1.0 / dt,
+    )
+    samples = []
+    prev_pos = pos0
+    prev_t = time.time()
+    t_start = prev_t
+    n = int(coast_s / dt)
+    for _ in range(n):
+        hold(rc_sock, make_channels(hover_pwm, armed=True, roll_pwm=1500), dt)
+        pos = query_pose()
+        now = time.time()
+        if pos is None:
+            samples.append((now - t_start, None, None, None, None))
+            continue
+        elapsed = now - t_start
+        step_dt = now - prev_t
+        vx = (pos[0] - prev_pos[0]) / step_dt if step_dt > 0 else 0.0
+        vy = (pos[1] - prev_pos[1]) / step_dt if step_dt > 0 else 0.0
+        speed_xy = (vx * vx + vy * vy) ** 0.5
+        drift_xy = (
+            (pos[0] - pos0[0]) * (pos[0] - pos0[0])
+            + (pos[1] - pos0[1]) * (pos[1] - pos0[1])
+        ) ** 0.5
+        samples.append((elapsed, pos, speed_xy, drift_xy, pos[2] - pos0[2]))
+        prev_pos = pos
+        prev_t = now
+
+    for t, pos, speed_xy, drift_xy, dz in samples:
+        if pos is None:
+            print(f"  coast t={t:.2f}s pos=? speed_xy=? drift_xy=?")
+        else:
+            print(
+                f"  coast t={t:.2f}s x={pos[0]:+.2f} y={pos[1]:+.2f} z={pos[2]:+.2f}m"
+                f" speed_xy={speed_xy:.3f}m/s drift_xy={drift_xy:.3f}m dz={dz:+.3f}m"
+            )
+
+    valid = [s for s in samples if s[1] is not None]
+    if len(valid) < 2:
+        logger.warning("Not enough pose samples to summarize coast.")
+        return
+
+    speeds = [s[2] for s in valid]
+    peak = max(speeds)
+    final = speeds[-1]
+    final_drift = valid[-1][3]
+    half_threshold = peak * 0.5
+    half_time = next((s[0] for s in valid if s[2] <= half_threshold), None)
+
+    logger.info("--- Lateral-coast summary ---")
+    logger.info("Peak sampled XY speed after leveling: %.3f m/s", peak)
+    logger.info("Final XY speed after %.1fs: %.3f m/s", valid[-1][0], final)
+    logger.info("XY drift while leveled: %.3f m", final_drift)
+    if half_time is None:
+        logger.info("Speed half-life: > %.1fs (did not drop below 50%%)", coast_s)
+    else:
+        logger.info("Speed half-life: %.2fs", half_time)
+
+
 def run_attitude_test(
     rc_sock, hover_pwm=1490, climb_pwm=1550, climb_s=3.0, sample_s=5.0,
     yaw_pwm=1530, dt=0.10,
@@ -963,7 +1084,8 @@ def main():
     parser.add_argument(
         "--mode",
         choices=["thrust", "yaw", "yaw-airborne", "hover", "both", "damper",
-                 "pitch-climb", "attitude", "inflight-hover", "damper-sim"],
+                 "pitch-climb", "lateral-coast", "attitude", "inflight-hover",
+                 "damper-sim"],
         default="both",
         help="Which test(s) to run (default: both)",
     )
@@ -1045,6 +1167,24 @@ def main():
         help="DRONE_YAW_PWM_CAP equivalent — used to convert yaw_pwm to steer_eq.",
     )
     parser.add_argument(
+        "--lateral-roll-pwm",
+        type=int,
+        default=2000,
+        help="CH1 roll PWM during lateral-coast acceleration phase.",
+    )
+    parser.add_argument(
+        "--lateral-accel-s",
+        type=float,
+        default=2.0,
+        help="Seconds to hold sideways roll before leveling.",
+    )
+    parser.add_argument(
+        "--lateral-coast-s",
+        type=float,
+        default=6.0,
+        help="Seconds to sample after returning roll to center.",
+    )
+    parser.add_argument(
         "--acro",
         action="store_true",
         help="Set CH6 = 1000 (Acro mode) instead of 2000 (Angle mode).",
@@ -1103,6 +1243,17 @@ def main():
             hover_pwm=args.airborne_hover,
             climb_pwm=args.airborne_climb,
             climb_s=args.airborne_climb_s,
+        )
+
+    if args.mode == "lateral-coast":
+        run_lateral_coast_test(
+            rc_sock,
+            hover_pwm=args.airborne_hover,
+            climb_pwm=args.airborne_climb,
+            climb_s=args.airborne_climb_s,
+            roll_pwm=args.lateral_roll_pwm,
+            accel_s=args.lateral_accel_s,
+            coast_s=args.lateral_coast_s,
         )
 
     if args.mode == "attitude":

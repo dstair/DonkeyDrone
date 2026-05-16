@@ -387,10 +387,11 @@ X add an 80mm size that matches the Pavo Pico II
 X with battery, 79g.
 X worlds - all 80 mm
 
-- clean up the UI. Want to show pitch, roll, yaw, and throttle.
-  - add status indicator, i.e. ARMED
-- black background for donkeydrone UI
+X clean up the UI. Want to show pitch, roll, yaw, and throttle.
+  X add status indicator, i.e. ARMED
+X black background for donkeydrone UI
 
+- fix skating rink effect.
 
 - Add randomization of worlds (wall locations, colors) for better CNN training
 - Add looping to train model on a variety of worlds

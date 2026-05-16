@@ -56,7 +56,7 @@ DRONE_THROTTLE_STEP_SIZE = (
 )
 
 # Max yaw rate scaling (steering input maps to yaw)
-DRONE_MAX_YAW_RATE = 270.0
+DRONE_MAX_YAW_RATE = 180.0
 
 
 DRONE_ANGLE_MODE=True # this appears to always set to Acro mode regardless of True/FLse
@@ -65,12 +65,12 @@ DRONE_YAW_THROTTLE_FEEDFORWARD = 0.0
 # Input sensitivity multiplier [0.0–1.0]: scales stick deflection sent to
 # BetaFlight. 1.0 = full deflection (±500 PWM from center on pitch/yaw);
 # 0.3 = gentler, easier-to-fly commands.
-DRONE_INPUT_SENSITIVITY = 0.2
+DRONE_INPUT_SENSITIVITY = 0.4
 
 # CH4 yaw deflection cap in PWM microseconds from center (1500). Yaw input at
 # hover PWM produces net upward thrust via motor-mixer ω² asymmetry — larger
 # deflections make the drone climb on every turn. Keep this small (20–40).
-DRONE_YAW_PWM_CAP = 30
+DRONE_YAW_PWM_CAP = 40
 
 # ---- Altitude Hold (Vertical Velocity Damper) ----
 # Proportional gain (PWM per m/s): -k_pwm * vz added to throttle when

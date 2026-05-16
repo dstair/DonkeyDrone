@@ -75,6 +75,7 @@ uv run --env-file .env python -c "import gz.transport13; print('OK')"
 ```
 
 Web UI: http://127.0.0.1:8887
+- Static files served from `~/dev/donkeycar-fork/donkeycar/parts/web_controller/templates/static/` (see `web.py:112`). Edit `main.js` there, not the copy in `donkeydrone/templates/static/`.
 
 ## Fresh Session Checklist
 
@@ -220,6 +221,7 @@ RC packet: `struct.pack('<d', timestamp)` + 16 × `struct.pack('<H', channel)` =
 | `~/dev/betaflight/` | BetaFlight firmware source (SITL target) |
 | `~/dev/betaflight/obj/main/betaflight_SITL.elf` | Compiled BetaFlight SITL binary |
 | `~/.gz/sim/8/server.config` | Gazebo default server plugins (Physics, UserCommands, SceneBroadcaster) |
+| `~/dev/donkeycar-fork/donkeycar/parts/web_controller/templates/static/main.js` | Web UI JS served at runtime — edit this file, NOT `donkeydrone/templates/static/main.js` |
 
 ## Camera Modes
 
@@ -329,6 +331,9 @@ Xbox controls:
 - Right stick X controls `roll`.
 - Right stick Y controls `throttle` (forward pitch).
 - RT is the explicit arm/deadman input.
+- LT triggers one-shot pose reset (teleports drone back to spawn via `/world/<world>/set_pose`).
+  B button cycles drive mode (user → local_angle → local).
+- Reset implemented in `DroneGymEnv._do_reset()` using `gz.transport13.Node.request()`.
 
 ### Planned: vertical-velocity damper (not yet implemented)
 

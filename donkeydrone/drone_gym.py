@@ -155,6 +155,7 @@ class DroneGymEnv:
         self.user_arm = None
         self._prev_user_arm = None
         self._explicit_arm_started_at = None
+        self._reset_requested = False
         self.last_roll_pwm = 1500
         self.last_pitch_pwm = 1500
         self.last_yaw_pwm = 1500
@@ -608,6 +609,9 @@ class DroneGymEnv:
         # Phase 3: Control loop
         loop_count = 0
         while self.running:
+            if self._reset_requested:
+                self._reset_requested = False
+                self._do_reset()
             channels = self._map_controls_to_rc()
             self._send_rc(channels)
 
@@ -693,7 +697,35 @@ class DroneGymEnv:
         except Exception as e:
             logger.error("BetaFlight loop error: %s", e)
 
-    def run_threaded(self, steering, throttle, roll, altitude, user_arm=None):
+    def _do_reset(self):
+        """Teleport the drone back to spawn position via gz-transport set_pose."""
+        try:
+            from gz.transport13 import Node
+            from gz.msgs10.pose_v_pb2 import Pose_V
+
+            node = Node()
+            pose_msg = Pose_V()
+            p = pose_msg.pose.add()
+            p.name = self.gz_model_name
+            p.position.x = 0.0
+            p.position.y = 0.0
+            p.position.z = 0.5
+            p.orientation.w = 1.0
+            result, _reply = node.request(
+                f"/world/{self.gz_world}/set_pose",
+                pose_msg,
+                1000,
+            )
+            if result:
+                logger.info("Drone pose reset to origin (world=%s model=%s)",
+                            self.gz_world, self.gz_model_name)
+            else:
+                logger.warning("Reset pose request failed for %s/%s",
+                               self.gz_world, self.gz_model_name)
+        except Exception as e:
+            logger.error("Reset pose error: %s", e)
+
+    def run_threaded(self, steering, throttle, roll, altitude, user_arm=None, user_reset=None):
         """
         Called by the DonkeyCar Vehicle loop each frame.
 
@@ -703,6 +735,7 @@ class DroneGymEnv:
         :param altitude: normalized altitude [-1, 1], mapped to motor throttle
         :param user_arm: optional bool. None = legacy auto-arm; True/False =
                          explicit arm switch (e.g. Xbox RT deadman).
+        :param user_reset: optional bool. True = one-shot pose reset from LT.
         :return: camera image array + optional telemetry values
         """
         # Loop delay measurement
@@ -744,6 +777,10 @@ class DroneGymEnv:
         if self.user_arm is not True:
             self._explicit_arm_started_at = None
         self._prev_user_arm = self.user_arm
+
+        # One-shot reset from Xbox LT (handled in background loop).
+        if user_reset is True:
+            self._reset_requested = True
 
         # Read camera frame
         if self.camera_source == "gz_transport":

@@ -6,9 +6,13 @@
 // blocking pygame/SDL/hidapi paths. GameController.framework is the only
 // supported way in, and it requires a real .app bundle.
 //
-// Frame format (22 bytes, little-endian):
-//   float32 leftX, float32 leftY, float32 rightX, float32 rightY, float32 rightTrigger,
+// Frame format (26 bytes, little-endian):
+//   float32 leftX, float32 leftY, float32 rightX, float32 rightY,
+//   float32 leftTrigger, float32 rightTrigger,
 //   uint8 buttons (bit0=A, bit1=B), uint8 connected (1/0)
+//
+// LT (leftTrigger) is a reset button: on rising edge past 0.5, the drone
+// teleports back to its spawn position.
 //
 // Socket path: $DONKEYDRONE_XBOX_SOCK or /tmp/donkeydrone_xbox.sock
 //
@@ -43,6 +47,7 @@ final class Bridge: NSObject {
     var lY: Float = 0
     var rX: Float = 0
     var rY: Float = 0
+    var lT: Float = 0
     var rT: Float = 0
     var buttons: UInt8 = 0
     var lastChangeAt: Date = .distantPast
@@ -145,6 +150,7 @@ final class Bridge: NSObject {
                 self.lY = gp.leftThumbstick.yAxis.value
                 self.rX = gp.rightThumbstick.xAxis.value
                 self.rY = gp.rightThumbstick.yAxis.value
+                self.lT = gp.leftTrigger.value
                 self.rT = gp.rightTrigger.value
                 var b: UInt8 = 0
                 if gp.buttonA.isPressed { b |= 0x01 }
@@ -199,13 +205,14 @@ final class Bridge: NSObject {
             let pollLX = g.leftThumbstick.xAxis.value
             let pollRX = g.rightThumbstick.xAxis.value
             let pollRY = g.rightThumbstick.yAxis.value
+            let pollLT = g.leftTrigger.value
             let pollRT = g.rightTrigger.value
             // Don't overwrite event-driven values with stale polled zeros —
             // only adopt polled values if they're non-zero or we've never
             // received an event-driven update.
-            if abs(pollLX) + abs(pollLY) + abs(pollRX) + abs(pollRY) + pollRT > 0.0001
+            if abs(pollLX) + abs(pollLY) + abs(pollRX) + abs(pollRY) + pollRT + pollLT > 0.0001
                 || lastChangeAt == .distantPast {
-                lX = pollLX; lY = pollLY; rX = pollRX; rY = pollRY; rT = pollRT
+                lX = pollLX; lY = pollLY; rX = pollRX; rY = pollRY; lT = pollLT; rT = pollRT
                 var b: UInt8 = 0
                 if g.buttonA.isPressed { b |= 0x01 }
                 if g.buttonB.isPressed { b |= 0x02 }
@@ -214,11 +221,12 @@ final class Bridge: NSObject {
         }
 
         let connected: UInt8 = controllers.isEmpty ? 0 : 1
-        var buf = Data(capacity: 22)
+        var buf = Data(capacity: 26)
         var f = lX; buf.append(Data(bytes: &f, count: 4))
         f = lY;     buf.append(Data(bytes: &f, count: 4))
         f = rX;     buf.append(Data(bytes: &f, count: 4))
         f = rY;     buf.append(Data(bytes: &f, count: 4))
+        f = lT;     buf.append(Data(bytes: &f, count: 4))
         f = rT;     buf.append(Data(bytes: &f, count: 4))
         buf.append(buttons)
         buf.append(connected)
@@ -236,11 +244,12 @@ final class Bridge: NSObject {
     func logStatus() {
         let polled: String
         if let g = controllers.first?.extendedGamepad {
-            polled = String(format: "poll[lX=%+.2f lY=%+.2f rX=%+.2f rY=%+.2f rT=%.2f A=%d B=%d]",
+            polled = String(format: "poll[lX=%+.2f lY=%+.2f rX=%+.2f rY=%+.2f lT=%.2f rT=%.2f A=%d B=%d]",
                             g.leftThumbstick.xAxis.value,
                             g.leftThumbstick.yAxis.value,
                             g.rightThumbstick.xAxis.value,
                             g.rightThumbstick.yAxis.value,
+                            g.leftTrigger.value,
                             g.rightTrigger.value,
                             g.buttonA.isPressed ? 1 : 0,
                             g.buttonB.isPressed ? 1 : 0)

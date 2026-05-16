@@ -236,7 +236,7 @@ def add_drone_sim(V, cfg):
     """
     gym = build_drone_env(cfg)
 
-    inputs = ["steering", "throttle", "roll", "altitude", "user/arm"]
+    inputs = ["steering", "throttle", "roll", "altitude", "user/arm", "user/reset"]
     outputs = [
         "cam/image_array",
         "rc/roll",
@@ -928,6 +928,7 @@ def add_user_controller(V, cfg, use_joystick, use_xbox=False, input_image="ui/im
                 "user/mode",
                 "recording",
                 "user/arm",
+                "user/reset",
             ],
         )
         # Xbox part is the controller of record for trigger callbacks etc.

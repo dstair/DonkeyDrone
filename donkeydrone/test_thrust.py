@@ -38,6 +38,7 @@ import os
 import socket
 import struct
 import time
+from utils.betaflight import pack_rc_frame
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -53,11 +54,7 @@ POSE_TOPIC = f"/world/{_GZ_WORLD}/dynamic_pose/info"
 
 def send_rc(rc_sock, channels):
     """Send 40-byte RC packet: timestamp + 16 x uint16."""
-    timestamp = time.time()
-    packet = struct.pack("<d", timestamp)
-    for ch in channels:
-        packet += struct.pack("<H", int(ch))
-    rc_sock.sendto(packet, (RC_HOST, RC_PORT))
+    rc_sock.sendto(pack_rc_frame(channels), (RC_HOST, RC_PORT))
 
 
 FLIGHT_MODE_ANGLE = True  # set False for Acro (CH6 = 1000)

@@ -6,6 +6,12 @@ import os
 import json
 
 class TubDataset(Dataset):
+    # Shared normalization constants
+    IMU_SCALES = {
+        'accel': 10.0, # m/s^2
+        'gyro': 5.0    # rad/s
+    }
+
     def __init__(self, tub_paths, seq_len=3, transform=None):
         """
         Args:
@@ -52,17 +58,13 @@ class TubDataset(Dataset):
         Raw accel is ~±10-20 m/s^2, Gyro is ~±5 rad/s.
         We scale them down so they are in a similar magnitude to the [0, 1] image pixels.
         """
-        # Scaling factors (approximate)
-        accel_scale = 10.0 
-        gyro_scale = 5.0
-        
         normalized = np.array([
-            imu_data[0] / accel_scale, # acl_x
-            imu_data[1] / accel_scale, # acl_y
-            imu_data[2] / accel_scale, # acl_z
-            imu_data[3] / gyro_scale,  # gyr_x
-            imu_data[4] / gyro_scale,  # gyr_y
-            imu_data[5] / gyro_scale   # gyr_z
+            imu_data[0] / self.IMU_SCALES['accel'], # acl_x
+            imu_data[1] / self.IMU_SCALES['accel'], # acl_y
+            imu_data[2] / self.IMU_SCALES['accel'], # acl_z
+            imu_data[3] / self.IMU_SCALES['gyro'],  # gyr_x
+            imu_data[4] / self.IMU_SCALES['gyro'],  # gyr_y
+            imu_data[5] / self.IMU_SCALES['gyro']   # gyr_z
         ], dtype=np.float32)
         return normalized
 

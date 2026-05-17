@@ -8,6 +8,7 @@ dependencies = [
     "albumentations>=2.0.8",
     "donkeycar @ git+https://github.com/dstair/donkeycar.git@feature/donkeydrone",
     "opencv-python-headless>=4.13.0.92",
+    "protobuf>=7.34.1",
     "pygame>=2.6.1",
     "torch>=2.2.0",
     "torchvision>=0.25.0",

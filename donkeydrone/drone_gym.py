@@ -37,6 +37,7 @@ import cv2
 import numpy as np
 
 from gz_telemetry import PoseTracker, init_pose_subscriber, init_sim_telemetry
+from utils.betaflight import MSPClient, pack_rc_frame
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ class DroneGymEnv:
         self.rc_port = rc_port
         self.camera_source = camera_source
         self.gz_camera_topic = gz_camera_topic
+        self.msp = MSPClient(host=rc_host)
         self.rtsp_url = rtsp_url
         self.max_pitch_angle = float(max_pitch_angle)
         self.max_roll_angle = (
@@ -315,12 +317,8 @@ class DroneGymEnv:
         Packet format: 8-byte timestamp (double) + 16 × 2-byte channels (uint16)
         = 40 bytes total.
         """
-        timestamp = time.time()
-        packet = struct.pack("<d", timestamp)
-        for ch in channels:
-            packet += struct.pack("<H", int(ch))
         try:
-            self._rc_sock.sendto(packet, (self.rc_host, self.rc_port))
+            self._rc_sock.sendto(pack_rc_frame(channels), (self.rc_host, self.rc_port))
         except OSError as e:
             logger.warning("RC send failed: %s", e)
 
@@ -422,83 +420,9 @@ class DroneGymEnv:
 
     def _query_arming_flags(self, timeout=0.5):
         """Query MSP_STATUS_EX and return BF's arming-disable + active-mode state.
-
-        Returns (arming_flags, [arming_flag_name, ...], active_mode_bits,
-        [active_mode_name, ...]). On failure returns (None, [], None, []).
-        arming_flags == 0 means BF has no arming-disable conditions and (with
-        AUX1 high) should be armed. active_mode_bits is BF's legacy flight-
-        mode bitmap — bit 0 = ARM, bit 1 = ANGLE, bit 2 = HORIZON.
+        Now delegated to MSPClient for repository-wide reuse.
         """
-        arming_flag_names = [
-            "NO_GYRO", "FAILSAFE", "RX_FAILSAFE", "NOT_DISARMED",
-            "BOXFAILSAFE", "RUNAWAY", "CRASH", "THROTTLE", "ANGLE",
-            "BOOT_GRACE", "NOPREARM", "LOAD", "CALIBRATING", "CLI",
-            "CMS_MENU", "BST", "MSP", "PARALYZE", "GPS", "RESC",
-            "DSHOT_TELEM", "REBOOT_REQ", "DSHOT_BB", "ACC_CAL",
-            "MOTOR_PROTO", "CRASHFLIP", "ALTHOLD", "POSHOLD", "ARM_SWITCH",
-        ]
-        # Legacy flight-mode bit positions (BF boxId order).
-        mode_flag_names = [
-            "ARM", "ANGLE", "HORIZON", "ANTIGRAVITY", "MAG", "HEADFREE",
-            "HEADADJ", "CAMSTAB", "PASSTHRU", "BEEPER", "LEDLOW",
-            "CALIB", "OSD", "TELEMETRY", "SERVO1", "SERVO2", "SERVO3",
-            "BLACKBOX", "FAILSAFE_MODE", "AIRMODE",
-        ]
-        sock = None
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            sock.connect((self.rc_host, 5761))
-            cmd = 150  # MSP_STATUS_EX
-            frame = b"$M<" + bytes([0, cmd, 0 ^ cmd])
-            sock.send(frame)
-            resp = b""
-            deadline = time.time() + timeout
-            while time.time() < deadline:
-                try:
-                    chunk = sock.recv(4096)
-                except socket.timeout:
-                    break
-                if not chunk:
-                    break
-                resp += chunk
-                if (
-                    len(resp) >= 5
-                    and resp[:3] == b"$M>"
-                    and len(resp) >= 6 + resp[3]
-                ):
-                    break
-            if len(resp) < 5 or resp[:3] != b"$M>":
-                return (None, [], None, [])
-            payload = resp[5 : 5 + resp[3]]
-            if len(payload) < 20:
-                return (None, [], None, [])
-            mode_bits = struct.unpack("<I", payload[6:10])[0]
-            active_modes = [
-                mode_flag_names[i]
-                for i in range(min(len(mode_flag_names), 32))
-                if mode_bits & (1 << i)
-            ]
-            flags_byte_count = payload[15] & 0x0F
-            offset = 16 + flags_byte_count
-            if len(payload) < offset + 5:
-                return (None, [], mode_bits, active_modes)
-            flags = struct.unpack("<I", payload[offset + 1 : offset + 5])[0]
-            active_arming = [
-                arming_flag_names[i]
-                for i in range(min(len(arming_flag_names), 29))
-                if flags & (1 << i)
-            ]
-            return (flags, active_arming, mode_bits, active_modes)
-        except OSError as e:
-            logger.warning("MSP status query failed: %s", e)
-            return (None, [], None, [])
-        finally:
-            if sock is not None:
-                try:
-                    sock.close()
-                except OSError:
-                    pass
+        return self.msp.query_status(timeout=timeout)
 
     def _update_bf_status(self, flags, active_arming, active_modes):
         if flags is None and not active_modes:

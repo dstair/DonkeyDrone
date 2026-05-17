@@ -8,8 +8,8 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # --no-manage: bring up Gazebo + BetaFlight SITL but skip drone_manage.py.
 #   Useful for test_thrust.py or any tool that needs the sim running without
 #   drone_manage fighting over RC UDP port 9004.
-# --airframe=65mm|80mm: which drone model + config + world to load.
-#   Default is 80mm (Pavo Pico II). Use 65mm for the BetaFPV Air65 profile.
+# --airframe=80mm: which drone model + config + world to load.
+#   Default is 80mm (Pavo Pico II).
 SKIP_MANAGE=0
 AIRFRAME="80mm"
 USE_XBOX=0
@@ -32,8 +32,8 @@ for arg in "$@"; do
     esac
 done
 
-if [ "$AIRFRAME" != "65mm" ] && [ "$AIRFRAME" != "80mm" ]; then
-    echo "error: --airframe must be 65mm or 80mm (got: $AIRFRAME)" >&2
+if [ "$AIRFRAME" != "80mm" ]; then
+    echo "error: only 80mm airframe is currently supported (got: $AIRFRAME)" >&2
     exit 1
 fi
 
